@@ -1,11 +1,65 @@
 const express = require('express');
+const session = require('express-session');
 const path = require('path');
 const db = require('./database');
 
 const app = express();
 const PORT = 3000;
 
+const AUTH_USER = process.env.AUTH_USER || 'admin';
+const AUTH_PASS = process.env.AUTH_PASS || 'admin';
+const SESSION_SECRET = process.env.SESSION_SECRET || 'gym-evolution-secret-change-me';
+
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
+
+app.use(session({
+  secret: SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 dias
+    httpOnly: true,
+  },
+}));
+
+// Rotas públicas (login)
+app.get('/login.html', (req, res) => {
+  if (req.session.authenticated) {
+    return res.redirect('/');
+  }
+  res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+app.post('/api/login', (req, res) => {
+  const { username, password } = req.body;
+  if (username === AUTH_USER && password === AUTH_PASS) {
+    req.session.authenticated = true;
+    return res.json({ success: true });
+  }
+  res.status(401).json({ error: 'Usuário ou senha incorretos' });
+});
+
+app.post('/api/logout', (req, res) => {
+  req.session.destroy(() => {
+    res.json({ success: true });
+  });
+});
+
+// Middleware de autenticação
+function requireAuth(req, res, next) {
+  if (req.session && req.session.authenticated) {
+    return next();
+  }
+  if (req.path.startsWith('/api/')) {
+    return res.status(401).json({ error: 'Não autenticado' });
+  }
+  res.redirect('/login.html');
+}
+
+// Proteger tudo abaixo
+app.use(requireAuth);
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Listar todas as medições ordenadas por data

@@ -305,6 +305,72 @@ td.evolution.neutral {
   100% { opacity: 0; transform: translateX(-50%) translateY(-10px); }
 }
 
+/* Login page */
+.login-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.login-card {
+  background: #2d2d2d;
+  border-radius: 12px;
+  padding: 40px;
+  width: 100%;
+  max-width: 380px;
+  border: 1px solid #444;
+}
+
+.login-title {
+  text-align: center;
+  font-size: 1.6rem;
+  margin-bottom: 4px;
+}
+
+.login-subtitle {
+  text-align: center;
+  color: #888;
+  font-size: 0.85rem;
+  margin-bottom: 28px;
+}
+
+.login-card .form-group {
+  margin-bottom: 16px;
+}
+
+.login-btn {
+  width: 100%;
+  padding: 12px;
+  font-size: 1rem;
+  margin-top: 8px;
+}
+
+.login-error {
+  color: #ef5350;
+  font-size: 0.85rem;
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+/* Logout button */
+.btn-logout {
+  background: transparent;
+  color: #999;
+  border: 1px solid #555;
+  padding: 10px 16px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-logout:hover {
+  color: #ef5350;
+  border-color: #ef5350;
+}
+
 @media (max-width: 600px) {
   .form-row,
   .form-grid {

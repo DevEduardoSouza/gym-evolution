@@ -277,5 +277,11 @@ document.getElementById('btn-export-prompt').addEventListener('click', () => {
   });
 });
 
+// Logout
+document.getElementById('btn-logout').addEventListener('click', async () => {
+  await fetch('/api/logout', { method: 'POST' });
+  window.location.href = '/login.html';
+});
+
 // Init
 loadData();
