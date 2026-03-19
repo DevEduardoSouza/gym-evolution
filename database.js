@@ -25,4 +25,18 @@ db.exec(`
   )
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS profile (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    sexo TEXT DEFAULT '',
+    idade INTEGER,
+    altura INTEGER,
+    freq INTEGER,
+    calorias INTEGER,
+    rotina TEXT DEFAULT ''
+  )
+`);
+
+db.exec(`INSERT OR IGNORE INTO profile (id) VALUES (1)`);
+
 module.exports = db;

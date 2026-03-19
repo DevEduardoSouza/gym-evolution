@@ -117,6 +117,22 @@ app.delete('/api/measurements/:id', (req, res) => {
   res.json({ success: true });
 });
 
+// Perfil
+app.get('/api/profile', (req, res) => {
+  const profile = db.prepare('SELECT * FROM profile WHERE id = 1').get();
+  res.json(profile || {});
+});
+
+app.put('/api/profile', (req, res) => {
+  const { sexo, idade, altura, freq, calorias, rotina } = req.body;
+  db.prepare(`
+    UPDATE profile SET sexo = ?, idade = ?, altura = ?, freq = ?, calorias = ?, rotina = ?
+    WHERE id = 1
+  `).run(sexo || '', idade || null, altura || null, freq || null, calorias || null, rotina || '');
+  const updated = db.prepare('SELECT * FROM profile WHERE id = 1').get();
+  res.json(updated);
+});
+
 app.listen(PORT, () => {
   console.log(`Servidor rodando em http://localhost:${PORT}`);
 });

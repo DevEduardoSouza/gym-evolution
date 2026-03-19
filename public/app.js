@@ -174,20 +174,17 @@ window.deleteMeasurement = async function (id) {
 };
 
 // Profile
-const PROFILE_KEY = 'gym_profile';
 const modalProfile = document.getElementById('modal-profile');
 const profileForm = document.getElementById('profile-form');
+let profileData = {};
 
-function loadProfile() {
-  try { return JSON.parse(localStorage.getItem(PROFILE_KEY)) || {}; } catch { return {}; }
+async function loadProfile() {
+  profileData = await api('GET', '/api/profile');
+  return profileData;
 }
 
-function saveProfile(data) {
-  localStorage.setItem(PROFILE_KEY, JSON.stringify(data));
-}
-
-document.getElementById('btn-profile').addEventListener('click', () => {
-  const p = loadProfile();
+document.getElementById('btn-profile').addEventListener('click', async () => {
+  const p = await loadProfile();
   document.getElementById('profile-sexo').value = p.sexo || '';
   document.getElementById('profile-idade').value = p.idade || '';
   document.getElementById('profile-altura').value = p.altura || '';
@@ -203,9 +200,9 @@ document.getElementById('btn-profile-cancel').addEventListener('click', () => {
 
 modalProfile.addEventListener('click', e => { if (e.target === modalProfile) modalProfile.classList.add('hidden'); });
 
-profileForm.addEventListener('submit', e => {
+profileForm.addEventListener('submit', async e => {
   e.preventDefault();
-  saveProfile({
+  profileData = await api('PUT', '/api/profile', {
     sexo: document.getElementById('profile-sexo').value,
     idade: document.getElementById('profile-idade').value,
     altura: document.getElementById('profile-altura').value,
@@ -222,7 +219,7 @@ profileForm.addEventListener('submit', e => {
 });
 
 // Export Prompt
-document.getElementById('btn-export-prompt').addEventListener('click', () => {
+document.getElementById('btn-export-prompt').addEventListener('click', async () => {
   if (measurements.length === 0) {
     alert('Nenhuma medição para exportar.');
     return;
@@ -230,7 +227,7 @@ document.getElementById('btn-export-prompt').addEventListener('click', () => {
 
   let prompt = `Analise minha evolução corporal e me dê feedbacks detalhados sobre meu progresso, pontos fortes, pontos de atenção e sugestões.\n\n`;
 
-  const profile = loadProfile();
+  const profile = await loadProfile();
   if (profile.sexo || profile.idade || profile.altura || profile.freq || profile.rotina) {
     prompt += `--- Perfil ---\n`;
     if (profile.sexo) prompt += `Sexo: ${profile.sexo}\n`;
