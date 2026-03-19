@@ -6,9 +6,9 @@ services:
     ports:
       - "3003:3000"
     environment:
-      - AUTH_USER=eduardosouzadev
-      - AUTH_PASS=6JVMmoyrWXSp1o_AEQ-6Jw
-      - SESSION_SECRET=WsEVYEHcO73cGoY6yhJXIit5pa0IUzPIY1iaToKyF50
+      - AUTH_USER=admin
+      - AUTH_PASS=change-me
+      - SESSION_SECRET=change-me-to-a-random-secret
     volumes:
       - gym_data:/app/data
 
