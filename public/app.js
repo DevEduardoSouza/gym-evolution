@@ -280,5 +280,23 @@ document.getElementById('btn-logout').addEventListener('click', async () => {
   window.location.href = '/login.html';
 });
 
+// Migrar perfil do localStorage para o servidor (uma vez)
+async function migrateProfile() {
+  const old = localStorage.getItem('gym_profile');
+  if (!old) return;
+  try {
+    const local = JSON.parse(old);
+    const server = await api('GET', '/api/profile');
+    const isEmpty = !server.sexo && !server.idade && !server.altura && !server.freq && !server.calorias && !server.rotina;
+    if (isEmpty && (local.sexo || local.idade || local.altura || local.freq || local.calorias || local.rotina)) {
+      await api('PUT', '/api/profile', local);
+      localStorage.removeItem('gym_profile');
+    } else {
+      localStorage.removeItem('gym_profile');
+    }
+  } catch {}
+}
+
 // Init
 loadData();
+migrateProfile();
