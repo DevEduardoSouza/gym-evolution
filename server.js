@@ -23,6 +23,9 @@ app.use(session({
   },
 }));
 
+// Arquivos públicos (CSS para login)
+app.use('/style.css', express.static(path.join(__dirname, 'public', 'style.css')));
+
 // Rotas públicas (login)
 app.get('/login.html', (req, res) => {
   if (req.session.authenticated) {
