@@ -4,7 +4,7 @@ const path = require('path');
 const db = require('./database');
 
 const app = express();
-const PORT = 3000;
+const PORT = 3010;
 
 const AUTH_USER = process.env.AUTH_USER || 'admin';
 const AUTH_PASS = process.env.AUTH_PASS || 'admin';
@@ -131,6 +131,101 @@ app.put('/api/profile', (req, res) => {
   `).run(sexo || '', idade || null, altura || null, freq || null, calorias || null, rotina || '');
   const updated = db.prepare('SELECT * FROM profile WHERE id = 1').get();
   res.json(updated);
+});
+
+// Water config
+app.get('/api/water-config', (req, res) => {
+  const config = db.prepare('SELECT * FROM water_config WHERE id = 1').get();
+  res.json(config || {});
+});
+
+app.put('/api/water-config', (req, res) => {
+  const { bottle_size_ml, daily_goal_ml } = req.body;
+  db.prepare(`
+    UPDATE water_config SET bottle_size_ml = ?, daily_goal_ml = ? WHERE id = 1
+  `).run(bottle_size_ml || 500, daily_goal_ml || 3000);
+  const updated = db.prepare('SELECT * FROM water_config WHERE id = 1').get();
+  res.json(updated);
+});
+
+// Water intake stats (must be before parameterized routes)
+app.get('/api/water-intake/stats', (req, res) => {
+  const config = db.prepare('SELECT * FROM water_config WHERE id = 1').get();
+  const goalBottles = config.daily_goal_ml / config.bottle_size_ml;
+
+  const rows = db.prepare('SELECT date, bottles FROM water_intake ORDER BY date ASC').all();
+
+  const totalLiters = rows.reduce((sum, r) => sum + r.bottles * config.bottle_size_ml, 0) / 1000;
+  const daysTracked = rows.length;
+  const averageDaily = daysTracked > 0
+    ? Math.round(rows.reduce((sum, r) => sum + r.bottles * config.bottle_size_ml, 0) / daysTracked)
+    : 0;
+
+  // Calculate streaks (days meeting goal, counting backwards from today)
+  const metGoalDates = new Set(
+    rows.filter(r => r.bottles >= goalBottles).map(r => r.date)
+  );
+
+  const today = new Date();
+  let currentStreak = 0;
+  let d = new Date(today);
+  while (true) {
+    const dateStr = d.toISOString().split('T')[0];
+    if (metGoalDates.has(dateStr)) {
+      currentStreak++;
+      d.setDate(d.getDate() - 1);
+    } else {
+      break;
+    }
+  }
+
+  // Best streak
+  let bestStreak = 0;
+  let streak = 0;
+  const sortedDates = [...metGoalDates].sort();
+  for (let i = 0; i < sortedDates.length; i++) {
+    if (i === 0) {
+      streak = 1;
+    } else {
+      const prev = new Date(sortedDates[i - 1]);
+      const curr = new Date(sortedDates[i]);
+      const diffDays = (curr - prev) / (1000 * 60 * 60 * 24);
+      streak = diffDays === 1 ? streak + 1 : 1;
+    }
+    if (streak > bestStreak) bestStreak = streak;
+  }
+
+  res.json({ currentStreak, bestStreak, totalLiters: +totalLiters.toFixed(1), daysTracked, averageDaily });
+});
+
+// Water intake - list by year
+app.get('/api/water-intake', (req, res) => {
+  const year = req.query.year || new Date().getFullYear();
+  const rows = db.prepare(
+    "SELECT * FROM water_intake WHERE date LIKE ? ORDER BY date ASC"
+  ).all(`${year}-%`);
+  res.json(rows);
+});
+
+// Water intake - upsert
+app.post('/api/water-intake', (req, res) => {
+  const { date, bottles } = req.body;
+  db.prepare(`
+    INSERT INTO water_intake (date, bottles) VALUES (?, ?)
+    ON CONFLICT(date) DO UPDATE SET bottles = ?
+  `).run(date, bottles, bottles);
+  const row = db.prepare('SELECT * FROM water_intake WHERE date = ?').get(date);
+  res.json(row);
+});
+
+// Water intake - delete by date
+app.delete('/api/water-intake/:date', (req, res) => {
+  const { date } = req.params;
+  const result = db.prepare('DELETE FROM water_intake WHERE date = ?').run(date);
+  if (result.changes === 0) {
+    return res.status(404).json({ error: 'Registro não encontrado' });
+  }
+  res.json({ success: true });
 });
 
 app.listen(PORT, () => {

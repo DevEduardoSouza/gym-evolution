@@ -21,12 +21,78 @@
       </div>
     </header>
 
-    <div class="table-wrapper">
-      <table id="measurements-table">
-        <thead id="table-head"></thead>
-        <tbody id="table-body"></tbody>
-      </table>
-      <p id="empty-msg" class="empty-msg">Nenhuma medição registrada. Clique em "+ Nova Medição" para começar.</p>
+    <nav class="tab-nav">
+      <button class="tab-btn active" data-tab="medicoes">Medicoes</button>
+      <button class="tab-btn" data-tab="agua">Agua</button>
+    </nav>
+
+    <div id="tab-medicoes" class="tab-panel active">
+      <div class="table-wrapper">
+        <table id="measurements-table">
+          <thead id="table-head"></thead>
+          <tbody id="table-body"></tbody>
+        </table>
+        <p id="empty-msg" class="empty-msg">Nenhuma medição registrada. Clique em "+ Nova Medição" para começar.</p>
+      </div>
+    </div>
+
+    <div id="tab-agua" class="tab-panel">
+      <div class="water-stats">
+        <div class="stat-card">
+          <span class="stat-value" id="stat-streak">0</span>
+          <span class="stat-label">Sequencia Atual</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value" id="stat-best">0</span>
+          <span class="stat-label">Melhor Sequencia</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value" id="stat-total">0</span>
+          <span class="stat-label">Total (L)</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value" id="stat-avg">0</span>
+          <span class="stat-label">Media Diaria (L)</span>
+        </div>
+      </div>
+
+      <div class="water-actions">
+        <button id="btn-water-config" class="btn-secondary">Configurar</button>
+        <button id="btn-remove-bottle" class="btn-secondary">- Garrafa</button>
+        <button id="btn-add-bottle" class="btn-primary">+ Garrafa</button>
+      </div>
+
+      <div class="water-progress">
+        <div class="progress-header">
+          <span id="progress-label">Hoje: 0 / 0 L</span>
+          <span id="progress-bottles">0 / 0 garrafas</span>
+        </div>
+        <div class="progress-bar-container">
+          <div class="progress-bar" id="progress-bar" style="width: 0%"></div>
+        </div>
+      </div>
+
+      <div class="heatmap-section">
+        <div class="heatmap-nav">
+          <button id="btn-year-prev" class="btn-secondary btn-sm">&lt;</button>
+          <span id="heatmap-year">2026</span>
+          <button id="btn-year-next" class="btn-secondary btn-sm">&gt;</button>
+        </div>
+        <div class="heatmap-wrapper">
+          <div class="heatmap-months" id="heatmap-months"></div>
+          <div class="heatmap-grid" id="heatmap-grid"></div>
+        </div>
+        <div class="heatmap-legend">
+          <span>Menos</span>
+          <span class="heatmap-cell level-0"></span>
+          <span class="heatmap-cell level-1"></span>
+          <span class="heatmap-cell level-2"></span>
+          <span class="heatmap-cell level-3"></span>
+          <span class="heatmap-cell level-4"></span>
+          <span>Mais</span>
+        </div>
+      </div>
+      <div id="heatmap-tooltip" class="heatmap-tooltip"></div>
     </div>
   </div>
 
@@ -138,6 +204,30 @@
         </div>
         <div class="form-actions">
           <button type="button" id="btn-profile-cancel" class="btn-secondary">Cancelar</button>
+          <button type="submit" class="btn-primary">Salvar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal Water Config -->
+  <div id="modal-water-config" class="modal-overlay hidden">
+    <div class="modal">
+      <h2>Configurar Agua</h2>
+      <form id="water-config-form">
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="wc-daily-goal">Meta diaria (litros)</label>
+            <input type="number" id="wc-daily-goal" step="0.1" min="0.5" placeholder="Ex: 3">
+          </div>
+          <div class="form-group">
+            <label for="wc-bottle-size">Tamanho da garrafa (litros)</label>
+            <input type="number" id="wc-bottle-size" step="0.05" min="0.1" placeholder="Ex: 0.5">
+          </div>
+        </div>
+        <p id="wc-preview" class="profile-hint"></p>
+        <div class="form-actions">
+          <button type="button" id="btn-wc-cancel" class="btn-secondary">Cancelar</button>
           <button type="submit" class="btn-primary">Salvar</button>
         </div>
       </form>

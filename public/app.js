@@ -297,6 +297,249 @@ async function migrateProfile() {
   } catch {}
 }
 
+// ======== TAB SWITCHING ========
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    if (btn.dataset.tab === 'agua') loadWaterData();
+  });
+});
+
+// ======== WATER TRACKER ========
+let waterConfig = { bottle_size_ml: 500, daily_goal_ml: 3000 };
+let waterIntake = [];
+let waterStats = {};
+let waterYear = new Date().getFullYear();
+
+function todayStr() {
+  return new Date().toLocaleDateString('en-CA');
+}
+
+async function loadWaterData() {
+  const [config, intake, stats] = await Promise.all([
+    api('GET', '/api/water-config'),
+    api('GET', `/api/water-intake?year=${waterYear}`),
+    api('GET', '/api/water-intake/stats'),
+  ]);
+  waterConfig = config;
+  waterIntake = intake;
+  waterStats = stats;
+  renderWaterUI();
+}
+
+function renderWaterUI() {
+  // Stats
+  document.getElementById('stat-streak').textContent = waterStats.currentStreak || 0;
+  document.getElementById('stat-best').textContent = waterStats.bestStreak || 0;
+  document.getElementById('stat-total').textContent = waterStats.totalLiters || 0;
+  document.getElementById('stat-avg').textContent = ((waterStats.averageDaily || 0) / 1000).toFixed(1);
+
+  // Progress bar for today
+  const today = todayStr();
+  const todayRecord = waterIntake.find(r => r.date === today);
+  const todayBottles = todayRecord ? todayRecord.bottles : 0;
+  const todayMl = todayBottles * waterConfig.bottle_size_ml;
+  const goalMl = waterConfig.daily_goal_ml;
+  const goalBottles = goalMl / waterConfig.bottle_size_ml;
+  const pct = goalMl > 0 ? Math.min(100, (todayMl / goalMl) * 100) : 0;
+
+  document.getElementById('progress-label').textContent = `Hoje: ${(todayMl / 1000).toFixed(1)} / ${(goalMl / 1000).toFixed(1)} L`;
+  document.getElementById('progress-bottles').textContent = `${todayBottles} / ${goalBottles} garrafas`;
+  document.getElementById('progress-bar').style.width = pct + '%';
+
+  // Year label
+  document.getElementById('heatmap-year').textContent = waterYear;
+
+  renderHeatmap();
+}
+
+function renderHeatmap() {
+  const grid = document.getElementById('heatmap-grid');
+  const monthsEl = document.getElementById('heatmap-months');
+  grid.innerHTML = '';
+  monthsEl.innerHTML = '';
+
+  // Build lookup
+  const lookup = {};
+  waterIntake.forEach(r => { lookup[r.date] = r.bottles; });
+
+  const goalBottles = waterConfig.daily_goal_ml / waterConfig.bottle_size_ml;
+
+  // Start from Jan 1 of the year
+  const jan1 = new Date(waterYear, 0, 1);
+  const dec31 = new Date(waterYear, 11, 31);
+
+  // Pad to start on Sunday (day 0)
+  const startDay = jan1.getDay(); // 0=Sun
+  const startDate = new Date(jan1);
+  startDate.setDate(startDate.getDate() - startDay);
+
+  // Generate cells
+  const today = todayStr();
+  let currentDate = new Date(startDate);
+
+  while (currentDate <= dec31 || currentDate.getDay() !== 0) {
+    const dateStr = currentDate.toLocaleDateString('en-CA');
+    const inYear = currentDate.getFullYear() === waterYear;
+    const cell = document.createElement('div');
+    cell.className = 'heatmap-cell';
+
+    if (!inYear) {
+      cell.classList.add('empty');
+    } else {
+      const bottles = lookup[dateStr] || 0;
+      const ratio = goalBottles > 0 ? bottles / goalBottles : 0;
+      let level = 0;
+      if (bottles > 0) {
+        if (ratio >= 1) level = 4;
+        else if (ratio >= 0.75) level = 3;
+        else if (ratio >= 0.5) level = 2;
+        else level = 1;
+      }
+      cell.classList.add('level-' + level);
+      cell.dataset.date = dateStr;
+      cell.dataset.bottles = bottles;
+      cell.dataset.ml = bottles * waterConfig.bottle_size_ml;
+
+      // Tooltip
+      cell.addEventListener('mouseenter', e => {
+        const tt = document.getElementById('heatmap-tooltip');
+        const b = parseFloat(cell.dataset.bottles);
+        const ml = parseFloat(cell.dataset.ml);
+        const d = cell.dataset.date;
+        tt.textContent = `${d}: ${(ml / 1000).toFixed(1)} L (${b} garrafas)`;
+        tt.style.display = 'block';
+        tt.style.left = e.clientX + 12 + 'px';
+        tt.style.top = e.clientY - 30 + 'px';
+      });
+      cell.addEventListener('mouseleave', () => {
+        document.getElementById('heatmap-tooltip').style.display = 'none';
+      });
+
+      // Click to edit
+      cell.addEventListener('click', async () => {
+        const d = cell.dataset.date;
+        const current = parseFloat(cell.dataset.bottles) || 0;
+        const input = prompt(`Garrafas para ${d}:`, current);
+        if (input === null) return;
+        const val = parseFloat(input);
+        if (isNaN(val) || val < 0) return;
+        if (val === 0) {
+          await api('DELETE', `/api/water-intake/${d}`);
+        } else {
+          await api('POST', '/api/water-intake', { date: d, bottles: val });
+        }
+        await loadWaterData();
+      });
+    }
+
+    grid.appendChild(cell);
+    currentDate.setDate(currentDate.getDate() + 1);
+  }
+
+  // Month labels
+  const months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+  months.forEach(m => {
+    const span = document.createElement('span');
+    span.textContent = m;
+    monthsEl.appendChild(span);
+  });
+}
+
+// Add/remove bottle buttons
+document.getElementById('btn-add-bottle').addEventListener('click', async () => {
+  const today = todayStr();
+  const existing = waterIntake.find(r => r.date === today);
+  const bottles = (existing ? existing.bottles : 0) + 1;
+  await api('POST', '/api/water-intake', { date: today, bottles });
+  await loadWaterData();
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = `+1 garrafa! (${(bottles * waterConfig.bottle_size_ml / 1000).toFixed(1)} L hoje)`;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 2100);
+});
+
+document.getElementById('btn-remove-bottle').addEventListener('click', async () => {
+  const today = todayStr();
+  const existing = waterIntake.find(r => r.date === today);
+  const current = existing ? existing.bottles : 0;
+  if (current <= 0) return;
+  const bottles = current - 1;
+  if (bottles === 0) {
+    await api('DELETE', `/api/water-intake/${today}`);
+  } else {
+    await api('POST', '/api/water-intake', { date: today, bottles });
+  }
+  await loadWaterData();
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = `-1 garrafa (${(bottles * waterConfig.bottle_size_ml / 1000).toFixed(1)} L hoje)`;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 2100);
+});
+
+// Water config modal
+const modalWaterConfig = document.getElementById('modal-water-config');
+const waterConfigForm = document.getElementById('water-config-form');
+const wcGoalInput = document.getElementById('wc-daily-goal');
+const wcBottleInput = document.getElementById('wc-bottle-size');
+const wcPreview = document.getElementById('wc-preview');
+
+function updateWcPreview() {
+  const goal = parseFloat(wcGoalInput.value) || 0;
+  const bottle = parseFloat(wcBottleInput.value) || 0.5;
+  const count = (goal / bottle).toFixed(1);
+  wcPreview.textContent = `Meta: ${goal} L/dia = ${count} garrafas de ${bottle} L`;
+}
+
+wcGoalInput.addEventListener('input', updateWcPreview);
+wcBottleInput.addEventListener('input', updateWcPreview);
+
+document.getElementById('btn-water-config').addEventListener('click', () => {
+  wcGoalInput.value = waterConfig.daily_goal_ml / 1000;
+  wcBottleInput.value = waterConfig.bottle_size_ml / 1000;
+  updateWcPreview();
+  modalWaterConfig.classList.remove('hidden');
+});
+
+document.getElementById('btn-wc-cancel').addEventListener('click', () => {
+  modalWaterConfig.classList.add('hidden');
+});
+
+modalWaterConfig.addEventListener('click', e => {
+  if (e.target === modalWaterConfig) modalWaterConfig.classList.add('hidden');
+});
+
+waterConfigForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  await api('PUT', '/api/water-config', {
+    daily_goal_ml: Math.round((parseFloat(wcGoalInput.value) || 3) * 1000),
+    bottle_size_ml: Math.round((parseFloat(wcBottleInput.value) || 0.5) * 1000),
+  });
+  modalWaterConfig.classList.add('hidden');
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = 'Configuracao salva!';
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 2100);
+  await loadWaterData();
+});
+
+// Year navigation
+document.getElementById('btn-year-prev').addEventListener('click', () => {
+  waterYear--;
+  loadWaterData();
+});
+
+document.getElementById('btn-year-next').addEventListener('click', () => {
+  waterYear++;
+  loadWaterData();
+});
+
 // Init
 loadData();
 migrateProfile();

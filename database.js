@@ -39,4 +39,22 @@ db.exec(`
 
 db.exec(`INSERT OR IGNORE INTO profile (id) VALUES (1)`);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS water_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    bottle_size_ml INTEGER DEFAULT 500,
+    daily_goal_ml INTEGER DEFAULT 3000
+  )
+`);
+
+db.exec(`INSERT OR IGNORE INTO water_config (id) VALUES (1)`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS water_intake (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL UNIQUE,
+    bottles REAL NOT NULL DEFAULT 0
+  )
+`);
+
 module.exports = db;
