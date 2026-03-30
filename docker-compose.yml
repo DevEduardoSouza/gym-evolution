@@ -9,6 +9,7 @@ services:
       - AUTH_USER=admin
       - AUTH_PASS=change-me
       - SESSION_SECRET=change-me-to-a-random-secret
+      - PORT=3000
     volumes:
       - gym_data:/app/data
 

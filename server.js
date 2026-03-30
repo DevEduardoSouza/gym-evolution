@@ -4,7 +4,7 @@ const path = require('path');
 const db = require('./database');
 
 const app = express();
-const PORT = 3010;
+const PORT = process.env.PORT || 3010;
 
 const AUTH_USER = process.env.AUTH_USER || 'admin';
 const AUTH_PASS = process.env.AUTH_PASS || 'admin';
