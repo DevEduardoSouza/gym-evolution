@@ -24,6 +24,7 @@
     <nav class="tab-nav">
       <button class="tab-btn active" data-tab="medicoes">Medicoes</button>
       <button class="tab-btn" data-tab="agua">Agua</button>
+      <button class="tab-btn" data-tab="treino">Treino</button>
     </nav>
 
     <div id="tab-medicoes" class="tab-panel active">
@@ -95,6 +96,62 @@
       <div id="heatmap-tooltip" class="heatmap-tooltip"></div>
     </div>
   </div>
+
+    <div id="tab-treino" class="tab-panel">
+      <div class="treino-stats">
+        <div class="stat-card">
+          <span class="stat-value" id="treino-stat-streak">0</span>
+          <span class="stat-label">Sequencia Atual</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value" id="treino-stat-best">0</span>
+          <span class="stat-label">Melhor Sequencia</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value" id="treino-stat-total">0</span>
+          <span class="stat-label">Total de Dias</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value" id="treino-stat-avg">0</span>
+          <span class="stat-label">Media Rating</span>
+        </div>
+      </div>
+
+      <div class="treino-today">
+        <p class="treino-today-label">Hoje:</p>
+        <div class="treino-emoji-picker" id="treino-emoji-picker">
+          <button class="emoji-btn" data-rating="1" title="Péssimo">😫</button>
+          <button class="emoji-btn" data-rating="2" title="Ruim">😕</button>
+          <button class="emoji-btn" data-rating="3" title="Ok">😐</button>
+          <button class="emoji-btn" data-rating="4" title="Bom">😊</button>
+          <button class="emoji-btn" data-rating="5" title="Ótimo">💪</button>
+        </div>
+        <span id="treino-today-status" class="treino-today-status">Nenhum treino registrado</span>
+        <button id="btn-treino-remove" class="btn-secondary btn-sm" style="display:none">Remover</button>
+      </div>
+
+      <div class="heatmap-section">
+        <div class="heatmap-nav">
+          <button id="btn-treino-year-prev" class="btn-secondary btn-sm">&lt;</button>
+          <span id="treino-heatmap-year">2026</span>
+          <button id="btn-treino-year-next" class="btn-secondary btn-sm">&gt;</button>
+        </div>
+        <div class="heatmap-wrapper">
+          <div class="heatmap-months" id="treino-heatmap-months"></div>
+          <div class="heatmap-grid" id="treino-heatmap-grid"></div>
+        </div>
+        <div class="treino-heatmap-legend">
+          <span>😫</span>
+          <span class="heatmap-cell treino-level-1"></span>
+          <span class="heatmap-cell treino-level-2"></span>
+          <span class="heatmap-cell treino-level-3"></span>
+          <span class="heatmap-cell treino-level-4"></span>
+          <span class="heatmap-cell treino-level-5"></span>
+          <span>💪</span>
+        </div>
+      </div>
+      <div id="treino-heatmap-tooltip" class="heatmap-tooltip"></div>
+    </div>
 
   <!-- Modal -->
   <div id="modal" class="modal-overlay hidden">

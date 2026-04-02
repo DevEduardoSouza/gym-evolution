@@ -565,6 +565,118 @@ td.evolution.neutral {
   white-space: nowrap;
 }
 
+/* Treino */
+.treino-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.treino-today {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: #252525;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+.treino-today-label {
+  font-size: 0.95rem;
+  color: #aaa;
+  font-weight: 500;
+}
+
+.treino-today-status {
+  color: #888;
+  font-size: 0.9rem;
+}
+
+.treino-emoji-picker {
+  display: flex;
+  gap: 6px;
+}
+
+.emoji-btn {
+  background: #333;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  font-size: 1.5rem;
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+  line-height: 1;
+}
+
+.emoji-btn:hover {
+  background: #444;
+  transform: scale(1.15);
+}
+
+.emoji-btn.active {
+  border-color: #4fc3f7;
+  background: #2a3a4a;
+}
+
+/* Treino heatmap colors */
+.heatmap-cell.treino-level-0 { background: #1a1a2e; }
+.heatmap-cell.treino-level-1 { background: #d32f2f; }
+.heatmap-cell.treino-level-2 { background: #f57c00; }
+.heatmap-cell.treino-level-3 { background: #fdd835; }
+.heatmap-cell.treino-level-4 { background: #66bb6a; }
+.heatmap-cell.treino-level-5 { background: #2e7d32; }
+
+.treino-heatmap-legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.treino-heatmap-legend .heatmap-cell {
+  cursor: default;
+}
+
+/* Treino popup */
+.treino-popup {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: #2d2d2d;
+  border: 1px solid #555;
+  border-radius: 12px;
+  padding: 20px 24px;
+  z-index: 200;
+  text-align: center;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+
+.treino-popup p {
+  margin-bottom: 12px;
+  color: #ccc;
+  font-size: 0.95rem;
+}
+
+.treino-popup-emojis {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+
+.treino-popup-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
 @media (max-width: 600px) {
   .container {
     padding: 16px 12px;
@@ -657,5 +769,21 @@ td.evolution.neutral {
   .modal {
     width: 95%;
     padding: 20px 16px;
+  }
+
+  .treino-stats {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .treino-today {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .emoji-btn {
+    font-size: 1.3rem;
+    padding: 6px 8px;
   }
 }

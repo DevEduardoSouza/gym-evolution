@@ -228,6 +228,80 @@ app.delete('/api/water-intake/:date', (req, res) => {
   res.json({ success: true });
 });
 
+// ======== TREINO ========
+
+// Treino stats
+app.get('/api/treino/stats', (req, res) => {
+  const rows = db.prepare('SELECT date, rating FROM treino ORDER BY date ASC').all();
+  const totalDays = rows.length;
+  const avgRating = totalDays > 0
+    ? +(rows.reduce((sum, r) => sum + r.rating, 0) / totalDays).toFixed(1)
+    : 0;
+
+  // Current streak (consecutive days counting backwards from today)
+  const allDates = new Set(rows.map(r => r.date));
+  const today = new Date();
+  let currentStreak = 0;
+  let d = new Date(today);
+  while (true) {
+    const dateStr = d.toISOString().split('T')[0];
+    if (allDates.has(dateStr)) {
+      currentStreak++;
+      d.setDate(d.getDate() - 1);
+    } else {
+      break;
+    }
+  }
+
+  // Best streak
+  let bestStreak = 0;
+  let streak = 0;
+  const sortedDates = [...allDates].sort();
+  for (let i = 0; i < sortedDates.length; i++) {
+    if (i === 0) {
+      streak = 1;
+    } else {
+      const prev = new Date(sortedDates[i - 1]);
+      const curr = new Date(sortedDates[i]);
+      const diffDays = (curr - prev) / (1000 * 60 * 60 * 24);
+      streak = diffDays === 1 ? streak + 1 : 1;
+    }
+    if (streak > bestStreak) bestStreak = streak;
+  }
+
+  res.json({ currentStreak, bestStreak, totalDays, avgRating });
+});
+
+// Treino - list by year
+app.get('/api/treino', (req, res) => {
+  const year = req.query.year || new Date().getFullYear();
+  const rows = db.prepare(
+    "SELECT * FROM treino WHERE date LIKE ? ORDER BY date ASC"
+  ).all(`${year}-%`);
+  res.json(rows);
+});
+
+// Treino - upsert
+app.post('/api/treino', (req, res) => {
+  const { date, rating, notes } = req.body;
+  db.prepare(`
+    INSERT INTO treino (date, rating, notes) VALUES (?, ?, ?)
+    ON CONFLICT(date) DO UPDATE SET rating = ?, notes = ?
+  `).run(date, rating, notes || '', rating, notes || '');
+  const row = db.prepare('SELECT * FROM treino WHERE date = ?').get(date);
+  res.json(row);
+});
+
+// Treino - delete by date
+app.delete('/api/treino/:date', (req, res) => {
+  const { date } = req.params;
+  const result = db.prepare('DELETE FROM treino WHERE date = ?').run(date);
+  if (result.changes === 0) {
+    return res.status(404).json({ error: 'Registro não encontrado' });
+  }
+  res.json({ success: true });
+});
+
 app.listen(PORT, () => {
   console.log(`Servidor rodando em http://localhost:${PORT}`);
 });

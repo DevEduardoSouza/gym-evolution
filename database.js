@@ -57,4 +57,13 @@ db.exec(`
   )
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS treino (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL UNIQUE,
+    rating INTEGER NOT NULL DEFAULT 3,
+    notes TEXT DEFAULT ''
+  )
+`);
+
 module.exports = db;

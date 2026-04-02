@@ -305,6 +305,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.add('active');
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
     if (btn.dataset.tab === 'agua') loadWaterData();
+    if (btn.dataset.tab === 'treino') loadTreinoData();
   });
 });
 
@@ -538,6 +539,210 @@ document.getElementById('btn-year-prev').addEventListener('click', () => {
 document.getElementById('btn-year-next').addEventListener('click', () => {
   waterYear++;
   loadWaterData();
+});
+
+// ======== TREINO TRACKER ========
+const TREINO_EMOJIS = { 1: '😫', 2: '😕', 3: '😐', 4: '😊', 5: '💪' };
+const TREINO_LABELS = { 1: 'Péssimo', 2: 'Ruim', 3: 'Ok', 4: 'Bom', 5: 'Ótimo' };
+let treinoData = [];
+let treinoStats = {};
+let treinoYear = new Date().getFullYear();
+
+async function loadTreinoData() {
+  const [data, stats] = await Promise.all([
+    api('GET', `/api/treino?year=${treinoYear}`),
+    api('GET', '/api/treino/stats'),
+  ]);
+  treinoData = data;
+  treinoStats = stats;
+  renderTreinoUI();
+}
+
+function renderTreinoUI() {
+  // Stats
+  document.getElementById('treino-stat-streak').textContent = treinoStats.currentStreak || 0;
+  document.getElementById('treino-stat-best').textContent = treinoStats.bestStreak || 0;
+  document.getElementById('treino-stat-total').textContent = treinoStats.totalDays || 0;
+  document.getElementById('treino-stat-avg').textContent = treinoStats.avgRating || 0;
+
+  // Today status
+  const today = todayStr();
+  const todayRecord = treinoData.find(r => r.date === today);
+  const statusEl = document.getElementById('treino-today-status');
+  const removeBtn = document.getElementById('btn-treino-remove');
+
+  // Highlight active emoji
+  document.querySelectorAll('#treino-emoji-picker .emoji-btn').forEach(btn => {
+    btn.classList.remove('active');
+    if (todayRecord && parseInt(btn.dataset.rating) === todayRecord.rating) {
+      btn.classList.add('active');
+    }
+  });
+
+  if (todayRecord) {
+    statusEl.textContent = `${TREINO_EMOJIS[todayRecord.rating]} ${TREINO_LABELS[todayRecord.rating]}`;
+    removeBtn.style.display = '';
+  } else {
+    statusEl.textContent = 'Nenhum treino registrado';
+    removeBtn.style.display = 'none';
+  }
+
+  // Year label
+  document.getElementById('treino-heatmap-year').textContent = treinoYear;
+
+  renderTreinoHeatmap();
+}
+
+function renderTreinoHeatmap() {
+  const grid = document.getElementById('treino-heatmap-grid');
+  const monthsEl = document.getElementById('treino-heatmap-months');
+  grid.innerHTML = '';
+  monthsEl.innerHTML = '';
+
+  // Build lookup
+  const lookup = {};
+  treinoData.forEach(r => { lookup[r.date] = r; });
+
+  const jan1 = new Date(treinoYear, 0, 1);
+  const dec31 = new Date(treinoYear, 11, 31);
+  const startDay = jan1.getDay();
+  const startDate = new Date(jan1);
+  startDate.setDate(startDate.getDate() - startDay);
+
+  let currentDate = new Date(startDate);
+
+  while (currentDate <= dec31 || currentDate.getDay() !== 0) {
+    const dateStr = currentDate.toLocaleDateString('en-CA');
+    const inYear = currentDate.getFullYear() === treinoYear;
+    const cell = document.createElement('div');
+    cell.className = 'heatmap-cell';
+
+    if (!inYear) {
+      cell.classList.add('empty');
+    } else {
+      const record = lookup[dateStr];
+      const rating = record ? record.rating : 0;
+      cell.classList.add(rating > 0 ? 'treino-level-' + rating : 'treino-level-0');
+      cell.dataset.date = dateStr;
+      cell.dataset.rating = rating;
+
+      // Tooltip
+      cell.addEventListener('mouseenter', e => {
+        const tt = document.getElementById('treino-heatmap-tooltip');
+        const r = parseInt(cell.dataset.rating);
+        if (r > 0) {
+          tt.textContent = `${cell.dataset.date}: ${TREINO_EMOJIS[r]} ${TREINO_LABELS[r]}`;
+        } else {
+          tt.textContent = `${cell.dataset.date}: Sem treino`;
+        }
+        tt.style.display = 'block';
+        tt.style.left = e.clientX + 12 + 'px';
+        tt.style.top = e.clientY - 30 + 'px';
+      });
+      cell.addEventListener('mouseleave', () => {
+        document.getElementById('treino-heatmap-tooltip').style.display = 'none';
+      });
+
+      // Click to set rating
+      cell.addEventListener('click', () => {
+        openTreinoRatingForDate(cell.dataset.date, parseInt(cell.dataset.rating));
+      });
+    }
+
+    grid.appendChild(cell);
+    currentDate.setDate(currentDate.getDate() + 1);
+  }
+
+  // Month labels
+  const months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+  months.forEach(m => {
+    const span = document.createElement('span');
+    span.textContent = m;
+    monthsEl.appendChild(span);
+  });
+}
+
+function openTreinoRatingForDate(date, currentRating) {
+  // Show a simple inline popup with emoji options
+  const existing = document.getElementById('treino-popup');
+  if (existing) existing.remove();
+
+  const popup = document.createElement('div');
+  popup.id = 'treino-popup';
+  popup.className = 'treino-popup';
+  popup.innerHTML = `
+    <p>${date}</p>
+    <div class="treino-popup-emojis">
+      ${[1,2,3,4,5].map(r => `
+        <button class="emoji-btn ${r === currentRating ? 'active' : ''}" data-r="${r}" title="${TREINO_LABELS[r]}">${TREINO_EMOJIS[r]}</button>
+      `).join('')}
+    </div>
+    <div class="treino-popup-actions">
+      ${currentRating > 0 ? '<button class="btn-secondary btn-sm" id="treino-popup-delete">Remover</button>' : ''}
+      <button class="btn-secondary btn-sm" id="treino-popup-close">Fechar</button>
+    </div>
+  `;
+  document.body.appendChild(popup);
+
+  popup.querySelectorAll('.emoji-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const rating = parseInt(btn.dataset.r);
+      await api('POST', '/api/treino', { date, rating });
+      popup.remove();
+      await loadTreinoData();
+    });
+  });
+
+  const deleteBtn = popup.querySelector('#treino-popup-delete');
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', async () => {
+      await api('DELETE', `/api/treino/${date}`);
+      popup.remove();
+      await loadTreinoData();
+    });
+  }
+
+  popup.querySelector('#treino-popup-close').addEventListener('click', () => {
+    popup.remove();
+  });
+}
+
+// Today emoji picker
+document.querySelectorAll('#treino-emoji-picker .emoji-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const rating = parseInt(btn.dataset.rating);
+    const today = todayStr();
+    await api('POST', '/api/treino', { date: today, rating });
+    await loadTreinoData();
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = `Treino registrado: ${TREINO_EMOJIS[rating]} ${TREINO_LABELS[rating]}`;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 2100);
+  });
+});
+
+// Remove today's treino
+document.getElementById('btn-treino-remove').addEventListener('click', async () => {
+  const today = todayStr();
+  await api('DELETE', `/api/treino/${today}`);
+  await loadTreinoData();
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = 'Treino removido';
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 2100);
+});
+
+// Year navigation
+document.getElementById('btn-treino-year-prev').addEventListener('click', () => {
+  treinoYear--;
+  loadTreinoData();
+});
+
+document.getElementById('btn-treino-year-next').addEventListener('click', () => {
+  treinoYear++;
+  loadTreinoData();
 });
 
 // Init
