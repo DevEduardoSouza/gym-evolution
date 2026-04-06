@@ -67,13 +67,19 @@ function buildEvolutionCell(field, fromM, toM) {
 }
 
 window.selectEvoColumn = function(id) {
-  if (evoFromId === null || (evoFromId !== null && evoToId !== null)) {
+  if (id === evoFromId) {
+    // Deselect from
+    evoFromId = evoToId;
+    evoToId = null;
+  } else if (id === evoToId) {
+    // Deselect to
+    evoToId = null;
+  } else if (evoFromId === null || (evoFromId !== null && evoToId !== null)) {
     // Start fresh selection
     evoFromId = id;
     evoToId = null;
   } else {
     // Second click — set the "to"
-    if (id === evoFromId) return; // same column, ignore
     evoToId = id;
     // Ensure from is before to in the measurements array
     const fromIdx = measurements.findIndex(m => m.id === evoFromId);
@@ -153,7 +159,8 @@ function render() {
     bodyHtml += `<tr><td>${field.label}</td>`;
     measurements.forEach(m => {
       const val = m[field.key];
-      bodyHtml += `<td>${val != null ? val : '-'}</td>`;
+      const colClass = m.id === evoFromId || m.id === evoToId ? 'evo-col-highlight' : '';
+      bodyHtml += `<td class="${colClass}">${val != null ? val : '-'}</td>`;
     });
     if (showEvolution) {
       if (hasCustomEvo) {

@@ -200,7 +200,8 @@ td.evolution.neutral {
   background: rgba(74, 158, 255, 0.2);
 }
 
-th.evo-selected {
+th.evo-selected,
+td.evo-col-highlight {
   background: rgba(74, 158, 255, 0.1) !important;
 }
 
