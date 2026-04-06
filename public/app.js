@@ -43,6 +43,54 @@ function formatDate(dateStr) {
   return `${d}/${m}/${y}`;
 }
 
+// Evolution period selection (click on columns)
+let evoFromId = null;
+let evoToId = null;
+
+function buildEvolutionCell(field, fromM, toM) {
+  const fromVal = fromM[field.key];
+  const toVal = toM[field.key];
+  if (fromVal != null && toVal != null) {
+    const diff = toVal - fromVal;
+    const sign = diff > 0 ? '+' : '';
+    let cls = 'neutral';
+    if (field.type === 'waist') {
+      if (diff < 0) cls = 'positive';
+      else if (diff > 0) cls = 'warning';
+    } else {
+      if (diff > 0) cls = 'positive';
+      else if (diff < 0) cls = 'negative';
+    }
+    return `<td class="evolution ${cls}">${sign}${diff.toFixed(1)}</td>`;
+  }
+  return '<td class="evolution neutral">-</td>';
+}
+
+window.selectEvoColumn = function(id) {
+  if (evoFromId === null || (evoFromId !== null && evoToId !== null)) {
+    // Start fresh selection
+    evoFromId = id;
+    evoToId = null;
+  } else {
+    // Second click — set the "to"
+    if (id === evoFromId) return; // same column, ignore
+    evoToId = id;
+    // Ensure from is before to in the measurements array
+    const fromIdx = measurements.findIndex(m => m.id === evoFromId);
+    const toIdx = measurements.findIndex(m => m.id === evoToId);
+    if (fromIdx > toIdx) {
+      [evoFromId, evoToId] = [evoToId, evoFromId];
+    }
+  }
+  render();
+};
+
+window.clearEvoSelection = function() {
+  evoFromId = null;
+  evoToId = null;
+  render();
+};
+
 function render() {
   const hasMeasurements = measurements.length > 0;
   document.querySelector('table').style.display = hasMeasurements ? '' : 'none';
@@ -60,11 +108,25 @@ function render() {
 
   const showEvolution = measurements.length >= 2;
 
+  // Validate evo selection still exists
+  if (evoFromId && !measurements.find(m => m.id === evoFromId)) evoFromId = null;
+  if (evoToId && !measurements.find(m => m.id === evoToId)) evoToId = null;
+
+  const evoFromM = evoFromId ? measurements.find(m => m.id === evoFromId) : null;
+  const evoToM = evoToId ? measurements.find(m => m.id === evoToId) : null;
+  const hasCustomEvo = evoFromM && evoToM;
+
   // Build header
   let headHtml = '<tr><th>Medida</th>';
   measurements.forEach(m => {
-    headHtml += `<th>
-      <span>${formatDate(m.date)}</span>
+    const isEvoFrom = m.id === evoFromId;
+    const isEvoTo = m.id === evoToId;
+    const isSelected = isEvoFrom || isEvoTo;
+    const selClass = isEvoFrom ? 'evo-selected evo-from' : isEvoTo ? 'evo-selected evo-to' : '';
+    const picking = evoFromId !== null && evoToId === null && !isEvoFrom ? 'evo-pickable' : '';
+
+    headHtml += `<th class="${selClass} ${picking}">
+      <span class="header-date" onclick="selectEvoColumn(${m.id})" title="Clique para comparar">${formatDate(m.date)}</span>
       <span class="header-label">${m.label || ''}</span>
       <span class="header-actions">
         <button class="btn-icon btn-edit" onclick="editMeasurement(${m.id})" title="Editar">&#9998;</button>
@@ -73,7 +135,14 @@ function render() {
     </th>`;
   });
   if (showEvolution) {
-    headHtml += '<th class="col-evolution">Evolução Total</th>';
+    if (hasCustomEvo) {
+      headHtml += `<th class="col-evolution col-evolution-period">
+        ${formatDate(evoFromM.date)} → ${formatDate(evoToM.date)}
+        <button class="btn-icon btn-evo-clear" onclick="clearEvoSelection()" title="Voltar para evolução total">&#10005;</button>
+      </th>`;
+    } else {
+      headHtml += '<th class="col-evolution">Evolução Total</th>';
+    }
   }
   headHtml += '</tr>';
   tableHead.innerHTML = headHtml;
@@ -87,24 +156,10 @@ function render() {
       bodyHtml += `<td>${val != null ? val : '-'}</td>`;
     });
     if (showEvolution) {
-      const firstVal = first[field.key];
-      const lastVal = last[field.key];
-      if (firstVal != null && lastVal != null) {
-        const diff = lastVal - firstVal;
-        const sign = diff > 0 ? '+' : '';
-        let cls = 'neutral';
-        if (field.type === 'waist') {
-          // Para cintura, diminuir é bom
-          if (diff < 0) cls = 'positive';
-          else if (diff > 0) cls = 'warning';
-        } else {
-          // Para músculos/peso, aumentar é bom
-          if (diff > 0) cls = 'positive';
-          else if (diff < 0) cls = 'negative';
-        }
-        bodyHtml += `<td class="evolution ${cls}">${sign}${diff.toFixed(1)}</td>`;
+      if (hasCustomEvo) {
+        bodyHtml += buildEvolutionCell(field, evoFromM, evoToM);
       } else {
-        bodyHtml += '<td class="evolution neutral">-</td>';
+        bodyHtml += buildEvolutionCell(field, first, last);
       }
     }
     bodyHtml += '</tr>';
