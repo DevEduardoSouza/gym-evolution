@@ -23,8 +23,10 @@ app.use(session({
   },
 }));
 
-// Arquivos públicos (CSS para login)
+// Arquivos públicos (CSS para login, favicon)
 app.use('/style.css', express.static(path.join(__dirname, 'public', 'style.css')));
+app.use('/favicon.svg', express.static(path.join(__dirname, 'public', 'favicon.svg')));
+app.get('/favicon.ico', (req, res) => res.redirect(301, '/favicon.svg'));
 
 // Rotas públicas (login)
 app.get('/login.html', (req, res) => {
