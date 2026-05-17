@@ -96,10 +96,20 @@
         </div>
       </div>
 
+      <div class="water-jar-section">
+        <div class="water-jar-wrapper">
+          <canvas id="water-jar-canvas"></canvas>
+        </div>
+        <div class="water-jar-readout">
+          <div class="readout-current"><span id="jar-current-l">0.0</span><span class="readout-unit">L</span></div>
+          <div class="readout-meta"><span id="jar-percent">0%</span> · meta <span id="jar-goal-l">3.0</span>L</div>
+        </div>
+      </div>
+
       <div class="water-actions">
-        <button id="btn-water-config" class="btn-secondary">Configurar</button>
-        <button id="btn-remove-bottle" class="btn-secondary">- Garrafa</button>
-        <button id="btn-add-bottle" class="btn-primary">+ Garrafa</button>
+        <button id="btn-water-config" class="btn-secondary"><span data-icon="settings"></span> Configurar</button>
+        <button id="btn-remove-bottle" class="btn-secondary"><span data-icon="minus"></span> Garrafa</button>
+        <button id="btn-add-bottle" class="btn-primary btn-glow"><span data-icon="plus"></span> Garrafa</button>
       </div>
 
       <div class="water-progress">
@@ -134,7 +144,6 @@
       </div>
       <div id="heatmap-tooltip" class="heatmap-tooltip"></div>
     </div>
-  </div>
 
     <div id="tab-treino" class="tab-panel">
       <div class="treino-stats">
@@ -244,6 +253,7 @@
         <p id="carga-empty" class="empty-msg">Selecione um exercicio e adicione registros.</p>
       </div>
     </div>
+  </div>
 
   <!-- Modal Carga -->
   <div id="modal-carga" class="modal-overlay hidden">
@@ -423,5 +433,18 @@
   </div>
 
   <script src="app.js"></script>
+  <script type="module">
+    import { initWaterJar, setWaterLevel, splash } from './water-jar.js';
+    const canvas = document.getElementById('water-jar-canvas');
+    if (canvas) {
+      initWaterJar(canvas);
+      window.__waterJar = { setWaterLevel, splash };
+      // Apply any pending level set before the module loaded
+      if (window.__pendingWaterLevel != null) {
+        setWaterLevel(window.__pendingWaterLevel);
+        window.__pendingWaterLevel = null;
+      }
+    }
+  </script>
 </body>
 </html>

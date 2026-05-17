@@ -108,16 +108,55 @@ function buildEvolutionCell(field, fromM, toM) {
     const diff = toVal - fromVal;
     const sign = diff > 0 ? '+' : '';
     let cls = 'neutral';
+    let arrow = '→';
     if (field.type === 'waist') {
-      if (diff < 0) cls = 'positive';
-      else if (diff > 0) cls = 'warning';
+      if (diff < 0) { cls = 'positive'; arrow = '↓'; }
+      else if (diff > 0) { cls = 'warning'; arrow = '↑'; }
     } else {
-      if (diff > 0) cls = 'positive';
-      else if (diff < 0) cls = 'negative';
+      if (diff > 0) { cls = 'positive'; arrow = '↑'; }
+      else if (diff < 0) { cls = 'negative'; arrow = '↓'; }
     }
-    return `<td class="evolution ${cls}">${sign}${diff.toFixed(1)}</td>`;
+    return `<td class="evolution"><span class="evo-pill ${cls}"><span class="evo-arrow">${arrow}</span>${sign}${diff.toFixed(1)}</span></td>`;
   }
-  return '<td class="evolution neutral">-</td>';
+  return '<td class="evolution"><span class="evo-pill neutral">—</span></td>';
+}
+
+function buildSparkline(field) {
+  const values = measurements.map(m => m[field.key]);
+  const valid = values.filter(v => v != null);
+  if (valid.length < 2) return '<span class="spark-empty">—</span>';
+
+  const min = Math.min(...valid);
+  const max = Math.max(...valid);
+  const range = max - min || 1;
+  const w = 70, h = 22, pad = 2;
+
+  let pts = '';
+  let lastX = 0, lastY = 0;
+  measurements.forEach((m, i) => {
+    const v = m[field.key];
+    if (v == null) return;
+    const x = (measurements.length === 1 ? w / 2 : (i / (measurements.length - 1)) * (w - pad * 2) + pad);
+    const y = h - pad - ((v - min) / range) * (h - pad * 2);
+    pts += `${x.toFixed(1)},${y.toFixed(1)} `;
+    lastX = x; lastY = y;
+  });
+
+  const first = valid[0], last = valid[valid.length - 1];
+  const trend = last - first;
+  let color = '#888';
+  if (field.type === 'waist') {
+    if (trend < 0) color = '#66bb6a';
+    else if (trend > 0) color = '#ffa726';
+  } else {
+    if (trend > 0) color = '#66bb6a';
+    else if (trend < 0) color = '#ef5350';
+  }
+
+  return `<svg class="sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    <polyline points="${pts.trim()}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+    <circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="2.2" fill="${color}"/>
+  </svg>`;
 }
 
 window.selectEvoColumn = function(id) {
@@ -378,7 +417,7 @@ function render() {
   const hasCustomEvo = evoFromM && evoToM;
 
   // Build header
-  let headHtml = '<tr><th>Medida</th>';
+  let headHtml = '<tr><th>Medida</th><th class="col-spark">Tendência</th>';
   measurements.forEach(m => {
     const isEvoFrom = m.id === evoFromId;
     const isEvoTo = m.id === evoToId;
@@ -411,11 +450,12 @@ function render() {
   // Build body
   let bodyHtml = '';
   FIELDS.forEach(field => {
-    bodyHtml += `<tr><td>${field.label}</td>`;
+    bodyHtml += `<tr data-field="${field.key}"><td class="cell-label"><span class="field-name">${field.label}</span>${field.unit ? ` <span class="field-unit">${field.unit}</span>` : ''}</td>`;
+    bodyHtml += `<td class="cell-spark">${buildSparkline(field)}</td>`;
     measurements.forEach(m => {
       const val = m[field.key];
       const colClass = m.id === evoFromId || m.id === evoToId ? 'evo-col-highlight' : '';
-      bodyHtml += `<td class="${colClass}">${val != null ? val : '-'}</td>`;
+      bodyHtml += `<td class="cell-value ${colClass}">${val != null ? `<span class="value-num">${val}</span>` : '<span class="value-empty">—</span>'}</td>`;
     });
     if (showEvolution) {
       if (hasCustomEvo) {
@@ -719,6 +759,20 @@ function renderWaterUI() {
   document.getElementById('progress-bottles').textContent = `${todayBottles} / ${goalBottles} garrafas`;
   document.getElementById('progress-bar').style.width = pct + '%';
 
+  // 3D jar readout + level
+  const jarCurEl = document.getElementById('jar-current-l');
+  const jarGoalEl = document.getElementById('jar-goal-l');
+  const jarPctEl = document.getElementById('jar-percent');
+  if (jarCurEl) jarCurEl.textContent = (todayMl / 1000).toFixed(1);
+  if (jarGoalEl) jarGoalEl.textContent = (goalMl / 1000).toFixed(1);
+  if (jarPctEl) jarPctEl.textContent = Math.round(pct) + '%';
+  const ratio = pct / 100;
+  if (window.__waterJar) {
+    window.__waterJar.setWaterLevel(ratio);
+  } else {
+    window.__pendingWaterLevel = ratio;
+  }
+
   // Year label
   document.getElementById('heatmap-year').textContent = waterYear;
 
@@ -825,6 +879,7 @@ document.getElementById('btn-add-bottle').addEventListener('click', async () => 
   const bottles = (existing ? existing.bottles : 0) + 1;
   await api('POST', '/api/water-intake', { date: today, bottles });
   await loadWaterData();
+  if (window.__waterJar && window.__waterJar.splash) window.__waterJar.splash();
   const toast = document.createElement('div');
   toast.className = 'toast';
   toast.textContent = `+1 garrafa! (${(bottles * waterConfig.bottle_size_ml / 1000).toFixed(1)} L hoje)`;
@@ -930,6 +985,11 @@ const ICONS = {
   // Bonus
   edit: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="m18.5 2.5 3 3L12 15l-4 1 1-4z"/></svg>',
   trash: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+  minus: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+  settings: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+  trending: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>',
+  award: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="6"/><path d="M15.477 12.89 17 22l-5-3-5 3 1.523-9.11"/></svg>',
+  calendar: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
 };
 const ICON_DUMBBELL = ICONS.dumbbell;
 const ICON_RUN = ICONS.run;
