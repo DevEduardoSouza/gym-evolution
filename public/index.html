@@ -7,27 +7,66 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="container">
-    <header>
-      <div>
-        <h1>Planilha de Evolução Consolidada</h1>
-        <p id="period" class="period"></p>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-brand">
+        <span class="brand-icon" data-icon="dumbbell"></span>
+        <span class="brand-text">Gym Evolution</span>
       </div>
-      <div class="header-buttons">
-        <button id="btn-profile" class="btn-secondary" title="Editar perfil">👤 Perfil</button>
-        <button id="btn-export-prompt" class="btn-secondary" title="Copiar prompt para IA">📋 Exportar Prompt</button>
-        <button id="btn-new" class="btn-primary">+ Nova Medição</button>
-        <button id="btn-logout" class="btn-logout" title="Sair">Sair</button>
+      <nav class="side-nav">
+        <button class="nav-btn active" data-tab="medicoes">
+          <span class="nav-icon" data-icon="ruler"></span><span class="nav-label">Medições</span>
+        </button>
+        <button class="nav-btn" data-tab="agua">
+          <span class="nav-icon" data-icon="drop"></span><span class="nav-label">Água</span>
+        </button>
+        <button class="nav-btn" data-tab="treino">
+          <span class="nav-icon" data-icon="dumbbell"></span><span class="nav-label">Treino</span>
+        </button>
+        <button class="nav-btn" data-tab="carga">
+          <span class="nav-icon" data-icon="chart"></span><span class="nav-label">Carga</span>
+        </button>
+      </nav>
+      <div class="sidebar-footer">
+        <button id="btn-profile" class="nav-btn" title="Editar perfil">
+          <span class="nav-icon" data-icon="user"></span><span class="nav-label">Perfil</span>
+        </button>
+        <button id="btn-logout" class="nav-btn nav-btn-logout" title="Sair">
+          <span class="nav-icon" data-icon="logout"></span><span class="nav-label">Sair</span>
+        </button>
       </div>
-    </header>
+    </aside>
 
-    <nav class="tab-nav">
-      <button class="tab-btn active" data-tab="medicoes">Medicoes</button>
-      <button class="tab-btn" data-tab="agua">Agua</button>
-      <button class="tab-btn" data-tab="treino">Treino</button>
-    </nav>
+    <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Menu">☰</button>
+
+    <main class="main-content">
+      <div class="container">
+        <header>
+          <div>
+            <h1 id="page-title">Medições</h1>
+            <p id="period" class="period"></p>
+          </div>
+          <div class="header-buttons">
+            <button id="btn-export-prompt" class="btn-secondary" title="Copiar prompt para IA"><span data-icon="file"></span> Exportar Prompt</button>
+            <button id="btn-new" class="btn-primary"><span data-icon="plus"></span> Nova Medição</button>
+          </div>
+        </header>
 
     <div id="tab-medicoes" class="tab-panel active">
+      <div class="body-card" id="body-card">
+        <div class="body-card-header">
+          <div>
+            <h3 id="body-card-title">Visualização Corporal</h3>
+            <p id="body-card-sub" class="body-card-sub"></p>
+          </div>
+          <div class="body-card-actions">
+            <span id="body-card-weight" class="body-weight-pill"></span>
+            <button id="btn-toggle-body" class="btn-secondary btn-sm" title="Ocultar/Mostrar boneco">Ocultar</button>
+          </div>
+        </div>
+        <div class="body-diagram" id="body-diagram"></div>
+      </div>
+      <div id="body-tooltip" class="body-tooltip" style="display:none"></div>
       <div class="table-wrapper">
         <table id="measurements-table">
           <thead id="table-head"></thead>
@@ -108,50 +147,139 @@
           <span class="stat-label">Melhor Sequencia</span>
         </div>
         <div class="stat-card">
-          <span class="stat-value" id="treino-stat-total">0</span>
-          <span class="stat-label">Total de Dias</span>
+          <span class="stat-value" id="treino-stat-musc">0</span>
+          <span class="stat-label"><span data-icon="dumbbell"></span> Musculação</span>
         </div>
         <div class="stat-card">
-          <span class="stat-value" id="treino-stat-avg">0</span>
-          <span class="stat-label">Media Rating</span>
+          <span class="stat-value" id="treino-stat-corrida">0</span>
+          <span class="stat-label"><span data-icon="run"></span> Corrida</span>
         </div>
       </div>
 
-      <div class="treino-today">
+      <div class="treino-today treino-today-activities">
         <p class="treino-today-label">Hoje:</p>
-        <div class="treino-emoji-picker" id="treino-emoji-picker">
-          <button class="emoji-btn" data-rating="1" title="Péssimo">😫</button>
-          <button class="emoji-btn" data-rating="2" title="Ruim">😕</button>
-          <button class="emoji-btn" data-rating="3" title="Ok">😐</button>
-          <button class="emoji-btn" data-rating="4" title="Bom">😊</button>
-          <button class="emoji-btn" data-rating="5" title="Ótimo">💪</button>
-        </div>
-        <span id="treino-today-status" class="treino-today-status">Nenhum treino registrado</span>
-        <button id="btn-treino-remove" class="btn-secondary btn-sm" style="display:none">Remover</button>
+        <button class="activity-btn" id="btn-today-musc" data-activity="musculacao">
+          <span class="activity-icon" data-icon="dumbbell"></span>
+          <span class="activity-label">Musculação</span>
+        </button>
+        <button class="activity-btn" id="btn-today-corrida" data-activity="corrida">
+          <span class="activity-icon" data-icon="run"></span>
+          <span class="activity-label">Corrida</span>
+        </button>
+        <span id="treino-today-status" class="treino-today-status">Nenhum treino hoje</span>
       </div>
 
-      <div class="heatmap-section">
-        <div class="heatmap-nav">
-          <button id="btn-treino-year-prev" class="btn-secondary btn-sm">&lt;</button>
-          <span id="treino-heatmap-year">2026</span>
-          <button id="btn-treino-year-next" class="btn-secondary btn-sm">&gt;</button>
+      <div class="calendar-section">
+        <div class="cal-header">
+          <div class="cal-nav">
+            <button id="btn-cal-prev" class="btn-secondary btn-sm">&lt;</button>
+            <span class="cal-title" id="cal-title">Mês 2026</span>
+            <button id="btn-cal-next" class="btn-secondary btn-sm">&gt;</button>
+          </div>
+          <div class="cal-flame" id="cal-flame" title="Sequência atual">
+            <span class="flame-emoji" data-icon="flame"></span>
+            <span class="flame-count" id="flame-count">0</span>
+          </div>
         </div>
-        <div class="heatmap-wrapper">
-          <div class="heatmap-months" id="treino-heatmap-months"></div>
-          <div class="heatmap-grid" id="treino-heatmap-grid"></div>
+        <div class="cal-weekdays">
+          <span>S</span><span>T</span><span>Q</span><span>Q</span><span>S</span><span>S</span><span>D</span>
         </div>
-        <div class="treino-heatmap-legend">
-          <span>😫</span>
-          <span class="heatmap-cell treino-level-1"></span>
-          <span class="heatmap-cell treino-level-2"></span>
-          <span class="heatmap-cell treino-level-3"></span>
-          <span class="heatmap-cell treino-level-4"></span>
-          <span class="heatmap-cell treino-level-5"></span>
-          <span>💪</span>
+        <div class="cal-grid" id="cal-grid"></div>
+        <div class="cal-legend">
+          <span class="legend-item"><span class="cal-day-mini has-musculacao"></span> Musculação</span>
+          <span class="legend-item"><span class="cal-day-mini has-corrida"></span> Corrida</span>
+          <span class="legend-item"><span class="cal-day-mini has-both"></span> Ambos</span>
         </div>
       </div>
-      <div id="treino-heatmap-tooltip" class="heatmap-tooltip"></div>
     </div>
+
+    <div id="tab-carga" class="tab-panel">
+      <div class="carga-header">
+        <div class="carga-select-row">
+          <div class="form-group">
+            <label for="carga-exercise">Exercicio</label>
+            <select id="carga-exercise"></select>
+          </div>
+          <button id="btn-carga-new" class="btn-primary">+ Registro</button>
+        </div>
+      </div>
+
+      <div class="carga-stats" id="carga-stats">
+        <div class="stat-card">
+          <span class="stat-value" id="carga-stat-atual">-</span>
+          <span class="stat-label">Peso Atual (kg)</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value" id="carga-stat-max">-</span>
+          <span class="stat-label">Peso Maximo (kg)</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value" id="carga-stat-total">0</span>
+          <span class="stat-label">Total Registros</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value" id="carga-stat-evo">-</span>
+          <span class="stat-label">Evolucao %</span>
+        </div>
+      </div>
+
+      <div class="carga-chart-wrapper">
+        <canvas id="carga-chart" height="220"></canvas>
+      </div>
+
+      <div class="carga-table-wrapper">
+        <table id="carga-table">
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th>Peso (kg)</th>
+              <th>Series</th>
+              <th>Reps</th>
+              <th>Evolucao</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="carga-table-body"></tbody>
+        </table>
+        <p id="carga-empty" class="empty-msg">Selecione um exercicio e adicione registros.</p>
+      </div>
+    </div>
+
+  <!-- Modal Carga -->
+  <div id="modal-carga" class="modal-overlay hidden">
+    <div class="modal">
+      <h2 id="modal-carga-title">Novo Registro de Carga</h2>
+      <form id="carga-form">
+        <input type="hidden" id="carga-form-id">
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="carga-form-date">Data</label>
+            <input type="date" id="carga-form-date" required>
+          </div>
+          <div class="form-group">
+            <label for="carga-form-exercise">Exercicio</label>
+            <select id="carga-form-exercise" required></select>
+          </div>
+          <div class="form-group">
+            <label for="carga-form-weight">Peso (kg)</label>
+            <input type="number" id="carga-form-weight" step="0.5" min="0" required>
+          </div>
+          <div class="form-group">
+            <label for="carga-form-sets">Series</label>
+            <input type="number" id="carga-form-sets" min="1" required>
+          </div>
+          <div class="form-group">
+            <label for="carga-form-reps">Reps</label>
+            <input type="number" id="carga-form-reps" min="1" required>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="button" id="btn-carga-cancel" class="btn-secondary">Cancelar</button>
+          <button type="submit" class="btn-primary">Salvar</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <!-- Modal -->
   <div id="modal" class="modal-overlay hidden">
@@ -289,6 +417,9 @@
         </div>
       </form>
     </div>
+  </div>
+
+    </main>
   </div>
 
   <script src="app.js"></script>

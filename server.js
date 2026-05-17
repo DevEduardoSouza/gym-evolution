@@ -232,8 +232,10 @@ app.delete('/api/water-intake/:date', (req, res) => {
 
 // Treino stats
 app.get('/api/treino/stats', (req, res) => {
-  const rows = db.prepare('SELECT date, rating FROM treino ORDER BY date ASC').all();
+  const rows = db.prepare('SELECT date, rating, musculacao, corrida FROM treino ORDER BY date ASC').all();
   const totalDays = rows.length;
+  const totalMusc = rows.filter(r => r.musculacao).length;
+  const totalCorrida = rows.filter(r => r.corrida).length;
   const avgRating = totalDays > 0
     ? +(rows.reduce((sum, r) => sum + r.rating, 0) / totalDays).toFixed(1)
     : 0;
@@ -269,7 +271,7 @@ app.get('/api/treino/stats', (req, res) => {
     if (streak > bestStreak) bestStreak = streak;
   }
 
-  res.json({ currentStreak, bestStreak, totalDays, avgRating });
+  res.json({ currentStreak, bestStreak, totalDays, totalMusc, totalCorrida, avgRating });
 });
 
 // Treino - list by year
@@ -283,11 +285,19 @@ app.get('/api/treino', (req, res) => {
 
 // Treino - upsert
 app.post('/api/treino', (req, res) => {
-  const { date, rating, notes } = req.body;
+  const { date, rating, notes, musculacao, corrida } = req.body;
+  const m = musculacao ? 1 : 0;
+  const c = corrida ? 1 : 0;
+  // If neither activity, delete the record (treat as "no training")
+  if (m === 0 && c === 0 && (rating == null || rating === 0)) {
+    db.prepare('DELETE FROM treino WHERE date = ?').run(date);
+    return res.json({ deleted: true, date });
+  }
+  const r = rating != null ? rating : (m ? 4 : 0);
   db.prepare(`
-    INSERT INTO treino (date, rating, notes) VALUES (?, ?, ?)
-    ON CONFLICT(date) DO UPDATE SET rating = ?, notes = ?
-  `).run(date, rating, notes || '', rating, notes || '');
+    INSERT INTO treino (date, rating, musculacao, corrida, notes) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(date) DO UPDATE SET rating = ?, musculacao = ?, corrida = ?, notes = ?
+  `).run(date, r, m, c, notes || '', r, m, c, notes || '');
   const row = db.prepare('SELECT * FROM treino WHERE date = ?').get(date);
   res.json(row);
 });
@@ -299,6 +309,57 @@ app.delete('/api/treino/:date', (req, res) => {
   if (result.changes === 0) {
     return res.status(404).json({ error: 'Registro não encontrado' });
   }
+  res.json({ success: true });
+});
+
+// ======== PROGRESSAO DE CARGA ========
+
+app.get('/api/progressao', (req, res) => {
+  const { exercise, year } = req.query;
+  let sql = 'SELECT * FROM progressao_carga WHERE 1=1';
+  const params = [];
+  if (exercise) {
+    sql += ' AND exercise = ?';
+    params.push(exercise);
+  }
+  if (year) {
+    sql += " AND date LIKE ?";
+    params.push(`${year}-%`);
+  }
+  sql += ' ORDER BY date ASC';
+  const rows = db.prepare(sql).all(...params);
+  res.json(rows);
+});
+
+app.get('/api/progressao/exercises', (req, res) => {
+  const rows = db.prepare('SELECT DISTINCT exercise FROM progressao_carga ORDER BY exercise ASC').all();
+  res.json(rows.map(r => r.exercise));
+});
+
+app.post('/api/progressao', (req, res) => {
+  const { date, exercise, weight, sets, reps } = req.body;
+  const result = db.prepare(
+    'INSERT INTO progressao_carga (date, exercise, weight, sets, reps) VALUES (?, ?, ?, ?, ?)'
+  ).run(date, exercise, weight || 0, sets || 0, reps || 0);
+  const row = db.prepare('SELECT * FROM progressao_carga WHERE id = ?').get(result.lastInsertRowid);
+  res.status(201).json(row);
+});
+
+app.put('/api/progressao/:id', (req, res) => {
+  const { id } = req.params;
+  const { date, exercise, weight, sets, reps } = req.body;
+  db.prepare(
+    'UPDATE progressao_carga SET date = ?, exercise = ?, weight = ?, sets = ?, reps = ? WHERE id = ?'
+  ).run(date, exercise, weight || 0, sets || 0, reps || 0, id);
+  const updated = db.prepare('SELECT * FROM progressao_carga WHERE id = ?').get(id);
+  if (!updated) return res.status(404).json({ error: 'Registro não encontrado' });
+  res.json(updated);
+});
+
+app.delete('/api/progressao/:id', (req, res) => {
+  const { id } = req.params;
+  const result = db.prepare('DELETE FROM progressao_carga WHERE id = ?').run(id);
+  if (result.changes === 0) return res.status(404).json({ error: 'Registro não encontrado' });
   res.json({ success: true });
 });
 

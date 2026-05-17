@@ -66,4 +66,27 @@ db.exec(`
   )
 `);
 
+// Migrate treino table: add musculacao + corrida columns
+(function migrateTreino() {
+  const cols = db.prepare("PRAGMA table_info(treino)").all().map(c => c.name);
+  if (!cols.includes('musculacao')) {
+    db.exec(`ALTER TABLE treino ADD COLUMN musculacao INTEGER DEFAULT 0`);
+    db.exec(`UPDATE treino SET musculacao = 1 WHERE rating > 0`);
+  }
+  if (!cols.includes('corrida')) {
+    db.exec(`ALTER TABLE treino ADD COLUMN corrida INTEGER DEFAULT 0`);
+  }
+})();
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS progressao_carga (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    exercise TEXT NOT NULL,
+    weight REAL NOT NULL DEFAULT 0,
+    sets INTEGER NOT NULL DEFAULT 0,
+    reps INTEGER NOT NULL DEFAULT 0
+  )
+`);
+
 module.exports = db;
