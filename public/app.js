@@ -285,6 +285,7 @@ function renderBodyDiagram() {
     subEl.textContent = '';
     weightEl.textContent = '';
     weightEl.className = 'body-weight-pill';
+    renderBodyGoal();
     return;
   }
 
@@ -321,6 +322,62 @@ function renderBodyDiagram() {
   container.innerHTML = buildBodySVG(current, compare);
   applyMuscleStates(container, current, compare);
   attachBodyInteractions(container, current, compare);
+
+  renderBodyGoal();
+}
+
+function fmtKg(n) {
+  return `${(+n).toFixed(1).replace(/\.0$/, '').replace('.', ',')} kg`;
+}
+
+// Meta de peso: progresso do início (primeira medição) até a meta definida no perfil
+function renderBodyGoal() {
+  const goalEl = document.getElementById('body-goal');
+  if (!goalEl) return;
+
+  const meta = profileData && profileData.peso_meta != null ? Number(profileData.peso_meta) : null;
+  const withPeso = measurements.filter(m => m.peso != null);
+  if (!meta || withPeso.length === 0) {
+    goalEl.style.display = 'none';
+    return;
+  }
+
+  const startW = withPeso[0].peso;
+  const currentW = withPeso[withPeso.length - 1].peso;
+  const statusEl = document.getElementById('body-goal-status');
+  const fillEl = document.getElementById('body-goal-fill');
+  const startEl = document.getElementById('body-goal-start');
+  const targetEl = document.getElementById('body-goal-target');
+
+  goalEl.style.display = '';
+  goalEl.classList.remove('reached', 'gain', 'loss');
+
+  const losing = meta <= startW; // direção da meta (perder ou ganhar peso)
+  const reached = losing ? currentW <= meta : currentW >= meta;
+
+  let pct;
+  if (Math.abs(startW - meta) < 0.05) {
+    pct = 100;
+  } else if (losing) {
+    pct = ((startW - currentW) / (startW - meta)) * 100;
+  } else {
+    pct = ((currentW - startW) / (meta - startW)) * 100;
+  }
+  pct = Math.max(0, Math.min(100, pct));
+
+  if (reached) {
+    goalEl.classList.add('reached');
+    pct = 100;
+    statusEl.innerHTML = 'Meta atingida! 🎉';
+  } else {
+    goalEl.classList.add(losing ? 'loss' : 'gain');
+    const falta = Math.abs(currentW - meta).toFixed(1).replace(/\.0$/, '').replace('.', ',');
+    statusEl.textContent = `faltam ${falta} kg`;
+  }
+
+  fillEl.style.width = pct.toFixed(0) + '%';
+  startEl.textContent = `Início ${fmtKg(startW)}`;
+  targetEl.textContent = `Meta ${fmtKg(meta)}`;
 }
 
 function attachBodyInteractions(container, current, compare) {
@@ -548,6 +605,7 @@ document.getElementById('btn-profile').addEventListener('click', async () => {
   document.getElementById('profile-freq').value = p.freq || '';
   document.getElementById('profile-calorias').value = p.calorias || '';
   document.getElementById('profile-rotina').value = p.rotina || '';
+  document.getElementById('profile-peso-meta').value = p.peso_meta || '';
   modalProfile.classList.remove('hidden');
 });
 
@@ -566,8 +624,10 @@ profileForm.addEventListener('submit', async e => {
     freq: document.getElementById('profile-freq').value,
     calorias: document.getElementById('profile-calorias').value,
     rotina: document.getElementById('profile-rotina').value,
+    peso_meta: document.getElementById('profile-peso-meta').value,
   });
   modalProfile.classList.add('hidden');
+  renderBodyGoal();
   const toast = document.createElement('div');
   toast.className = 'toast';
   toast.textContent = 'Perfil salvo!';
@@ -585,13 +645,14 @@ document.getElementById('btn-export-prompt').addEventListener('click', async () 
   let prompt = `Analise minha evolução corporal e me dê feedbacks detalhados sobre meu progresso, pontos fortes, pontos de atenção e sugestões.\n\n`;
 
   const profile = await loadProfile();
-  if (profile.sexo || profile.idade || profile.altura || profile.freq || profile.rotina) {
+  if (profile.sexo || profile.idade || profile.altura || profile.freq || profile.rotina || profile.peso_meta) {
     prompt += `--- Perfil ---\n`;
     if (profile.sexo) prompt += `Sexo: ${profile.sexo}\n`;
     if (profile.idade) prompt += `Idade: ${profile.idade} anos\n`;
     if (profile.altura) prompt += `Altura: ${profile.altura} cm\n`;
     if (profile.freq) prompt += `Treinos por semana: ${profile.freq}x\n`;
     if (profile.calorias) prompt += `Calorias por dia: ${profile.calorias} kcal\n`;
+    if (profile.peso_meta) prompt += `Meta de peso: ${profile.peso_meta} kg\n`;
     if (profile.rotina) prompt += `Rotina: ${profile.rotina}\n`;
     prompt += '\n';
   }
@@ -982,6 +1043,7 @@ const ICONS = {
   file: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>',
   plus: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
   flame: '<svg class="icon-svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2c-1 4-4 5-4 9 0 1.5.5 2.5 1.5 3.5C8 14 7.5 12 9 10c.5 3 2 4 3 5 1.5 1.5 1 3.5-.5 4.5C15 19 18 17 18 13c0-5-3-7-6-11z"/></svg>',
+  target: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg>',
   // Bonus
   edit: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="m18.5 2.5 3 3L12 15l-4 1 1-4z"/></svg>',
   trash: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
@@ -1498,3 +1560,4 @@ injectIcons();
 updateHeaderActions('medicoes');
 loadData();
 migrateProfile();
+loadProfile().then(renderBodyGoal).catch(() => {});

@@ -126,11 +126,11 @@ app.get('/api/profile', (req, res) => {
 });
 
 app.put('/api/profile', (req, res) => {
-  const { sexo, idade, altura, freq, calorias, rotina } = req.body;
+  const { sexo, idade, altura, freq, calorias, rotina, peso_meta } = req.body;
   db.prepare(`
-    UPDATE profile SET sexo = ?, idade = ?, altura = ?, freq = ?, calorias = ?, rotina = ?
+    UPDATE profile SET sexo = ?, idade = ?, altura = ?, freq = ?, calorias = ?, rotina = ?, peso_meta = ?
     WHERE id = 1
-  `).run(sexo || '', idade || null, altura || null, freq || null, calorias || null, rotina || '');
+  `).run(sexo || '', idade || null, altura || null, freq || null, calorias || null, rotina || '', peso_meta || null);
   const updated = db.prepare('SELECT * FROM profile WHERE id = 1').get();
   res.json(updated);
 });

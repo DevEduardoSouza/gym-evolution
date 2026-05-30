@@ -39,6 +39,14 @@ db.exec(`
 
 db.exec(`INSERT OR IGNORE INTO profile (id) VALUES (1)`);
 
+// Migrate profile table: add peso_meta column (meta de peso)
+(function migrateProfile() {
+  const cols = db.prepare("PRAGMA table_info(profile)").all().map(c => c.name);
+  if (!cols.includes('peso_meta')) {
+    db.exec(`ALTER TABLE profile ADD COLUMN peso_meta REAL`);
+  }
+})();
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS water_config (
     id INTEGER PRIMARY KEY CHECK (id = 1),

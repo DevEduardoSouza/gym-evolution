@@ -560,6 +560,71 @@ th.evo-pickable .header-date {
 .body-weight-pill.negative { background: #2e1e1e; color: #ef5350; border-color: #4f2f2f; }
 .body-weight-pill.warning  { background: #2e2718; color: #ffa726; border-color: #4f3f2f; }
 
+/* Meta de peso */
+.body-goal {
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: #1c2530;
+  border: 1px solid #28323d;
+  border-radius: 12px;
+}
+
+.body-goal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.body-goal-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #cfd8e3;
+}
+
+.body-goal-label .icon-svg {
+  width: 15px;
+  height: 15px;
+  color: #4fc3f7;
+}
+
+.body-goal-status {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #4fc3f7;
+}
+
+.body-goal.reached .body-goal-status { color: #66bb6a; }
+
+.body-goal-track {
+  height: 8px;
+  background: #0f1620;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.body-goal-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #29b6f6, #4fc3f7);
+  transition: width 0.5s ease;
+}
+
+.body-goal.gain .body-goal-fill { background: linear-gradient(90deg, #66bb6a, #9ccc65); }
+.body-goal.reached .body-goal-fill { background: linear-gradient(90deg, #43a047, #66bb6a); }
+
+.body-goal-ends {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 0.72rem;
+  color: #7c8a99;
+}
+
 .body-diagram {
   display: flex;
   justify-content: center;

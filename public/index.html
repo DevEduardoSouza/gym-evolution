@@ -65,6 +65,19 @@
             <button id="btn-toggle-body" class="btn-secondary btn-sm" title="Ocultar/Mostrar boneco">Ocultar</button>
           </div>
         </div>
+        <div class="body-goal" id="body-goal" style="display:none">
+          <div class="body-goal-head">
+            <span class="body-goal-label"><span data-icon="target"></span> Meta de peso</span>
+            <span class="body-goal-status" id="body-goal-status"></span>
+          </div>
+          <div class="body-goal-track">
+            <div class="body-goal-fill" id="body-goal-fill"></div>
+          </div>
+          <div class="body-goal-ends">
+            <span id="body-goal-start"></span>
+            <span id="body-goal-target"></span>
+          </div>
+        </div>
         <div class="body-diagram" id="body-diagram"></div>
       </div>
       <div id="body-tooltip" class="body-tooltip" style="display:none"></div>
@@ -388,6 +401,10 @@
           <div class="form-group">
             <label for="profile-freq">Treinos por semana</label>
             <input type="number" id="profile-freq" placeholder="Ex: 5">
+          </div>
+          <div class="form-group">
+            <label for="profile-peso-meta">Meta de peso (kg)</label>
+            <input type="number" id="profile-peso-meta" step="0.1" placeholder="Ex: 70">
           </div>
         </div>
         <div class="form-group">
