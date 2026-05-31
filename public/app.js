@@ -330,7 +330,9 @@ function fmtKg(n) {
   return `${(+n).toFixed(1).replace(/\.0$/, '').replace('.', ',')} kg`;
 }
 
-// Meta de peso: progresso do início (primeira medição) até a meta definida no perfil
+// Meta de peso: compara o peso atual com a meta definida no perfil.
+// A direção (perder/ganhar) vem do peso atual vs meta — não da primeira medição,
+// já que o peso pode ter passado da meta no sentido oposto ao desejado hoje.
 function renderBodyGoal() {
   const goalEl = document.getElementById('body-goal');
   if (!goalEl) return;
@@ -342,7 +344,6 @@ function renderBodyGoal() {
     return;
   }
 
-  const startW = withPeso[0].peso;
   const currentW = withPeso[withPeso.length - 1].peso;
   const statusEl = document.getElementById('body-goal-status');
   const fillEl = document.getElementById('body-goal-fill');
@@ -352,17 +353,13 @@ function renderBodyGoal() {
   goalEl.style.display = '';
   goalEl.classList.remove('reached', 'gain', 'loss');
 
-  const losing = meta <= startW; // direção da meta (perder ou ganhar peso)
-  const reached = losing ? currentW <= meta : currentW >= meta;
+  const TOL = 0.05;
+  const diff = currentW - meta; // > 0: acima da meta (perder); < 0: abaixo (ganhar)
+  const reached = Math.abs(diff) <= TOL;
 
-  let pct;
-  if (Math.abs(startW - meta) < 0.05) {
-    pct = 100;
-  } else if (losing) {
-    pct = ((startW - currentW) / (startW - meta)) * 100;
-  } else {
-    pct = ((currentW - startW) / (meta - startW)) * 100;
-  }
+  // Barra: progresso a partir do ponto mais distante já registrado até a meta.
+  const maxDist = Math.max(...withPeso.map(m => Math.abs(m.peso - meta)));
+  let pct = maxDist > TOL ? (1 - Math.abs(diff) / maxDist) * 100 : 100;
   pct = Math.max(0, Math.min(100, pct));
 
   if (reached) {
@@ -370,13 +367,13 @@ function renderBodyGoal() {
     pct = 100;
     statusEl.innerHTML = 'Meta atingida! 🎉';
   } else {
-    goalEl.classList.add(losing ? 'loss' : 'gain');
-    const falta = Math.abs(currentW - meta).toFixed(1).replace(/\.0$/, '').replace('.', ',');
-    statusEl.textContent = `faltam ${falta} kg`;
+    goalEl.classList.add(diff > 0 ? 'loss' : 'gain');
+    const falta = Math.abs(diff).toFixed(1).replace(/\.0$/, '').replace('.', ',');
+    statusEl.textContent = `${falta} kg a ${diff > 0 ? 'perder' : 'ganhar'}`;
   }
 
   fillEl.style.width = pct.toFixed(0) + '%';
-  startEl.textContent = `Início ${fmtKg(startW)}`;
+  startEl.textContent = `Atual ${fmtKg(currentW)}`;
   targetEl.textContent = `Meta ${fmtKg(meta)}`;
 }
 
