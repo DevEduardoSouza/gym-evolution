@@ -84,6 +84,10 @@ async function api(method, url, body) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(url, opts);
+  if (res.status === 401) {
+    window.location.href = '/login.html';
+    return new Promise(() => {}); // nunca resolve; a página vai redirecionar
+  }
   return res.json();
 }
 
@@ -694,6 +698,17 @@ document.getElementById('btn-logout').addEventListener('click', async () => {
   await fetch('/api/logout', { method: 'POST' });
   window.location.href = '/login.html';
 });
+
+// Usuário logado (sidebar)
+(async function loadMe() {
+  try {
+    const me = await api('GET', '/api/me');
+    if (me && me.username) {
+      document.getElementById('sidebar-username').textContent = me.username;
+      document.getElementById('sidebar-user').hidden = false;
+    }
+  } catch { /* mantém escondido */ }
+})();
 
 // Migrar perfil do localStorage para o servidor (uma vez)
 async function migrateProfile() {
