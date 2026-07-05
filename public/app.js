@@ -936,13 +936,24 @@ function renderHeatmap() {
     currentDate.setDate(currentDate.getDate() + 1);
   }
 
-  // Month labels
+  // Month labels — cada rótulo na coluna da semana em que o mês começa
   const months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-  months.forEach(m => {
+  months.forEach((m, idx) => {
     const span = document.createElement('span');
     span.textContent = m;
+    const first = new Date(waterYear, idx, 1);
+    const week = Math.floor((startDay + Math.round((first - jan1) / 86400000)) / 7);
+    span.style.gridColumn = `${week + 1} / span 4`;
     monthsEl.appendChild(span);
   });
+
+  // Em telas estreitas a grade rola: começa mostrando a semana atual
+  const wrapper = grid.parentElement;
+  if (String(waterYear) === today.slice(0, 4) && wrapper.scrollWidth > wrapper.clientWidth) {
+    const todayWeek = Math.floor((startDay + Math.round((new Date() - jan1) / 86400000)) / 7);
+    const cellPx = grid.firstElementChild ? grid.firstElementChild.offsetWidth + 3 : 17;
+    wrapper.scrollLeft = Math.max(0, todayWeek * cellPx - wrapper.clientWidth / 2);
+  }
 }
 
 // Add/remove bottle buttons
