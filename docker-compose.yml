@@ -4,11 +4,11 @@ services:
     container_name: gym_app
     restart: unless-stopped
     ports:
-      - "3004:3000"
+      - "${GYM_PORT:-3003}:3000"
     environment:
-      - AUTH_USER=admin
-      - AUTH_PASS=change-me
-      - SESSION_SECRET=change-me-to-a-random-secret
+      - AUTH_USER=${AUTH_USER:-admin}
+      - AUTH_PASS=${AUTH_PASS:-admin}
+      - SESSION_SECRET=${SESSION_SECRET:-gym-evolution-secret-change-me}
       - PORT=3000
     volumes:
       - gym_data:/app/data
