@@ -109,6 +109,16 @@ if (!tableColumns('notifications').includes('actor_id')) {
   db.exec('ALTER TABLE notifications ADD COLUMN actor_id INTEGER');
 }
 
+// Preenche o autor das notificações antigas a partir da referência (idempotente)
+db.prepare(`
+  UPDATE notifications SET actor_id = (SELECT id FROM users WHERE username = substr(notifications.ref, 3) COLLATE NOCASE)
+  WHERE kind = 'follow' AND actor_id IS NULL
+`).run();
+db.prepare(`
+  UPDATE notifications SET actor_id = (SELECT id FROM users WHERE username = substr(notifications.ref, 16) COLLATE NOCASE)
+  WHERE kind = 'ranking' AND actor_id IS NULL
+`).run();
+
 // Fotos de progresso (shape check)
 db.exec(`
   CREATE TABLE IF NOT EXISTS progress_photos (
