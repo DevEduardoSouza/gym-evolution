@@ -29,17 +29,21 @@
         <button class="nav-btn active" data-tab="hoje">
           <span class="nav-icon" data-icon="home"></span><span class="nav-label">Hoje</span>
         </button>
+        <button class="nav-btn" data-tab="ciclo">
+          <span class="nav-icon" data-icon="dumbbell"></span><span class="nav-label">Treino</span>
+        </button>
         <button class="nav-btn" data-tab="medicoes">
-          <span class="nav-icon" data-icon="ruler"></span><span class="nav-label">Medições</span>
+          <span class="nav-icon" data-icon="ruler"></span><span class="nav-label">Corpo</span>
         </button>
         <button class="nav-btn" data-tab="agua">
           <span class="nav-icon" data-icon="drop"></span><span class="nav-label">Água</span>
         </button>
         <button class="nav-btn" data-tab="treino">
-          <span class="nav-icon" data-icon="dumbbell"></span><span class="nav-label">Treino</span>
+          <span class="nav-icon" data-icon="calendar"></span><span class="nav-label">Frequência</span>
         </button>
-        <button class="nav-btn" data-tab="ciclo">
-          <span class="nav-icon" data-icon="calendar"></span><span class="nav-label">Semana</span>
+        <button class="nav-btn" data-tab="avisos">
+          <span class="nav-icon" data-icon="bell"></span><span class="nav-label">Notificações</span>
+          <span class="nav-badge" id="notif-badge" hidden>0</span>
         </button>
       </nav>
       <div class="sidebar-footer">
@@ -83,7 +87,7 @@
               <h3 id="hoje-treino-title">Treino de hoje</h3>
               <p class="day-sub" id="hoje-treino-sub"></p>
             </div>
-            <button id="btn-hoje-semana" class="btn-secondary btn-sm">Ver semana</button>
+            <button id="btn-hoje-semana" class="btn-secondary btn-sm">Ver treino</button>
           </div>
           <div id="hoje-exercicios" class="hoje-exercicios"></div>
           <p id="hoje-treino-empty" class="empty-msg" style="display:none">Dia livre hoje. Descansa que amanhã tem! 🛌</p>
@@ -380,6 +384,17 @@
       </div>
     </div>
 
+    <div id="tab-avisos" class="tab-panel">
+      <div class="hoje-card">
+        <div class="hoje-card-head">
+          <h3><span data-icon="bell"></span> Notificações</h3>
+          <span class="table-sub" id="avisos-sub"></span>
+        </div>
+        <div id="notif-list" class="notif-list"></div>
+        <p id="notif-empty" class="empty-msg" style="display:none">Nada por aqui ainda. Treina que as novidades chegam! 🔔</p>
+      </div>
+    </div>
+
     <div id="tab-perfil" class="tab-panel">
       <div class="perfil-hero">
         <div class="perfil-left">
@@ -387,8 +402,12 @@
             <div>
               <h3 id="perfil-username">—</h3>
               <p class="perfil-since" id="perfil-since"></p>
+              <p class="pub-counts" id="perfil-follow-counts"></p>
             </div>
-            <button id="btn-profile-edit" class="btn-secondary btn-sm"><span data-icon="edit"></span> Editar dados</button>
+            <span class="perfil-head-actions">
+              <button id="btn-wrapped" class="btn-primary btn-sm">✨ Retrospectiva</button>
+              <button id="btn-profile-edit" class="btn-secondary btn-sm"><span data-icon="edit"></span> Editar dados</button>
+            </span>
           </div>
           <div class="perfil-chips">
             <span class="perfil-chip perfil-chip-rank" id="perfil-rank">Nível 1 · Frango</span>
@@ -409,6 +428,77 @@
         </div>
         <input type="file" id="perfil-avatar-input" accept="image/*" hidden>
       </div>
+
+      <div class="hoje-card perfil-section">
+        <div class="hoje-card-head">
+          <h3>🏅 Conquistas</h3>
+          <span class="table-sub" id="conq-sub"></span>
+        </div>
+        <div class="conq-grid" id="conq-grid"></div>
+      </div>
+
+      <div class="hoje-card perfil-section">
+        <div class="hoje-card-head">
+          <h3>🏆 Recordes pessoais</h3>
+          <span class="table-hint">Maior carga registrada em cada exercício</span>
+        </div>
+        <div class="pr-list" id="pr-list"></div>
+        <p id="pr-empty" class="empty-msg" style="display:none">Registre séries nos exercícios para criar seus recordes.</p>
+      </div>
+    </div>
+
+    <!-- Página de perfil de outro usuário (aberta pelo ranking) -->
+    <div id="tab-user" class="tab-panel">
+      <button type="button" id="btn-user-back" class="btn-secondary btn-sm user-back">← Voltar</button>
+      <div class="perfil-hero">
+        <div class="perfil-left">
+          <div class="perfil-head">
+            <div>
+              <h3 id="pub-name">—</h3>
+              <p class="perfil-since" id="pub-since"></p>
+              <p class="pub-counts" id="pub-counts"></p>
+            </div>
+            <button type="button" id="btn-pub-follow" class="btn-primary btn-sm">Seguir</button>
+          </div>
+          <div class="perfil-chips">
+            <span class="perfil-chip perfil-chip-rank" id="pub-rank"></span>
+            <span class="perfil-chip" id="pub-xp"></span>
+          </div>
+          <h4 class="med-attr-title">Estatísticas</h4>
+          <div class="med-attrs" id="pub-stats-grid">
+            <div class="med-attr">
+              <div class="med-attr-top"><span class="med-attr-name">Dias completos</span></div>
+              <span class="med-attr-value" id="pub-days">0</span>
+            </div>
+            <div class="med-attr">
+              <div class="med-attr-top"><span class="med-attr-name">Exercícios concluídos</span></div>
+              <span class="med-attr-value" id="pub-ex">0</span>
+            </div>
+            <div class="med-attr">
+              <div class="med-attr-top"><span class="med-attr-name">Conquistas</span></div>
+              <span class="med-attr-value" id="pub-conq-count">0</span>
+            </div>
+          </div>
+        </div>
+        <div class="perfil-photo pub-photo" id="pub-pic">
+          <span class="perfil-avatar-fallback" data-icon="user"></span>
+        </div>
+      </div>
+
+      <div class="hoje-card perfil-section">
+        <div class="hoje-card-head">
+          <h3>🏅 Conquistas</h3>
+        </div>
+        <div class="pub-conq" id="pub-conq"></div>
+      </div>
+
+      <div class="hoje-card perfil-section">
+        <div class="hoje-card-head">
+          <h3>🏆 Recordes pessoais</h3>
+        </div>
+        <div class="pr-list" id="pub-prs"></div>
+        <p class="empty-msg" id="pub-empty" style="display:none">Ainda sem recordes registrados.</p>
+      </div>
     </div>
   </div>
 
@@ -425,6 +515,22 @@
       <div class="form-actions library-footer">
         <button type="button" id="btn-custom-exercise" class="btn-secondary"><span data-icon="plus"></span> Criar exercício</button>
         <button type="button" id="btn-library-close" class="btn-primary">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Retrospectiva (wrapped) -->
+  <div id="modal-wrapped" class="modal-overlay hidden">
+    <div class="wrapped-panel">
+      <div class="wrapped-tabs">
+        <button type="button" class="wrapped-tab active" data-v="treino">🏋️ Treino</button>
+        <button type="button" class="wrapped-tab" data-v="meta">🎯 Meta de peso</button>
+      </div>
+      <canvas id="wrapped-canvas" width="1080" height="1920"></canvas>
+      <div class="wrapped-actions">
+        <button type="button" id="btn-wrapped-share" class="btn-primary">Compartilhar</button>
+        <button type="button" id="btn-wrapped-download" class="btn-secondary">Baixar imagem</button>
+        <button type="button" id="btn-wrapped-close" class="btn-secondary">Fechar</button>
       </div>
     </div>
   </div>

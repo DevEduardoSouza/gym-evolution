@@ -4037,3 +4037,186 @@ button, a, input, select, textarea, label, canvas,
 /* Esquema como texto no card (input removido) */
 .ex-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .ex-scheme-txt { font-size: 0.72rem; color: var(--faint); font-variant-numeric: tabular-nums; }
+
+/* Conquistas */
+.perfil-section { margin-top: 14px; }
+.perfil-head-actions { display: flex; gap: 8px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+.conq-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+}
+.conq {
+  background: var(--card-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  padding: 14px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 4px;
+  opacity: 0.55;
+}
+.conq.unlocked {
+  opacity: 1;
+  border-color: rgba(255, 255, 255, 0.28);
+  background: var(--card);
+}
+.conq-icon { font-size: 1.7rem; line-height: 1.2; }
+.conq.unlocked .conq-icon { filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.25)); }
+.conq-title { font-size: 0.8rem; font-weight: 800; color: var(--text); }
+.conq-desc { font-size: 0.66rem; color: var(--faint); line-height: 1.35; }
+.conq-bar {
+  width: 100%;
+  height: 5px;
+  background: var(--card-3);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 6px;
+}
+.conq-bar-fill { height: 100%; background: #fff; border-radius: 999px; }
+.conq-progress { font-size: 0.62rem; color: var(--faint); font-variant-numeric: tabular-nums; }
+
+/* Recordes */
+.pr-list { display: flex; flex-direction: column; gap: 6px; }
+.pr-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--card-2);
+  border: 1px solid var(--border-soft);
+}
+.pr-pos { width: 28px; flex-shrink: 0; }
+.pr-name { flex: 1; min-width: 0; font-weight: 700; color: var(--text); font-size: 0.88rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pr-date { font-size: 0.7rem; color: var(--faint); flex-shrink: 0; }
+.pr-weight { font-weight: 800; color: #fff; font-size: 0.95rem; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+
+/* Retrospectiva */
+.wrapped-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  max-height: 94vh;
+}
+#wrapped-canvas {
+  height: min(78vh, 720px);
+  width: auto;
+  aspect-ratio: 9 / 16;
+  border-radius: 22px;
+  border: 1px solid var(--card-3);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+.wrapped-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+
+@media (max-width: 700px) {
+  .conq-grid { grid-template-columns: repeat(2, 1fr); }
+  .perfil-head-actions { justify-content: flex-start; }
+}
+
+/* Abas da retrospectiva */
+.wrapped-tabs { display: flex; gap: 8px; }
+.wrapped-tab {
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 7px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: inherit;
+  background: var(--card-2);
+  border: 1px solid var(--card-3);
+  color: var(--muted);
+  transition: all 0.15s ease;
+}
+.wrapped-tab.active { background: #fff; color: #000; border-color: #fff; }
+
+/* Perfil público */
+.modal-pub { max-width: 520px; width: min(520px, 94vw); max-height: 88vh; overflow-y: auto; }
+.pub-head { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; }
+.pub-pic {
+  width: 72px;
+  height: 72px;
+  border-radius: 20px;
+  background: var(--card-3) center/cover no-repeat;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--faint);
+}
+.pub-pic .icon-svg { width: 30px; height: 30px; }
+.pub-pic.has-photo .icon-svg { display: none; }
+.pub-head-info h2 { margin: 0; font-size: 1.25rem; }
+.pub-conq { display: flex; flex-wrap: wrap; gap: 6px; }
+.pub-conq-chip {
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--card-2);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--text);
+}
+.rank-row { cursor: pointer; transition: border-color 0.2s ease, transform 0.15s ease; }
+.rank-row:hover { border-color: #48484c; transform: translateY(-1px); }
+
+/* Notificações */
+.nav-btn { position: relative; }
+.nav-badge {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--red);
+  color: #fff;
+  font-size: 0.66rem;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.nav-btn.active .nav-badge { background: #000; color: #fff; }
+.notif-list { display: flex; flex-direction: column; gap: 6px; }
+.notif-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--card-2);
+  border: 1px solid var(--border-soft);
+}
+.notif-row.unread { border-color: rgba(255, 255, 255, 0.3); background: var(--card); }
+.notif-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: var(--card-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+.notif-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.notif-title { font-weight: 700; color: var(--text); font-size: 0.88rem; }
+.notif-body { font-size: 0.76rem; color: var(--muted); line-height: 1.4; }
+.notif-time { font-size: 0.68rem; color: var(--faint); flex-shrink: 0; margin-top: 2px; }
+.nav-badge[hidden] { display: none; }
+
+.pub-counts { font-size: 0.78rem; color: var(--muted); font-weight: 600; margin-top: 3px; }
+.pub-head { align-items: flex-start; }
+#btn-pub-follow { flex-shrink: 0; margin-left: auto; }
+
+/* Página de perfil de outro usuário */
+.user-back { margin-bottom: 14px; }
+.pub-photo { cursor: default; }
+.pub-photo:hover { border-color: var(--card-3); }
+#pub-stats-grid .med-attr-value { font-size: 1.15rem; }

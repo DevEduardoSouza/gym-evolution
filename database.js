@@ -77,6 +77,32 @@ if (!tableColumns('profile').includes('avatar')) {
   db.exec("ALTER TABLE profile ADD COLUMN avatar TEXT DEFAULT ''");
 }
 
+// Seguidores (rede social)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS follows (
+    follower_id INTEGER NOT NULL,
+    followed_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (follower_id, followed_id)
+  )
+`);
+
+// Notificações internas (feed estilo rede social)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    kind TEXT NOT NULL,
+    ref TEXT DEFAULT '',
+    icon TEXT DEFAULT '🔔',
+    title TEXT NOT NULL,
+    body TEXT DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    read INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(user_id, kind, ref)
+  )
+`);
+
 // Fotos de progresso (shape check)
 db.exec(`
   CREATE TABLE IF NOT EXISTS progress_photos (

@@ -12,7 +12,52 @@ const SESSION_SECRET = process.env.SESSION_SECRET || 'gym-evolution-secret-chang
 app.use(express.json({ limit: '2mb' })); // avatar em base64 no perfil
 app.use(express.urlencoded({ extended: false }));
 
+// Sessões persistidas no SQLite: sobrevivem a restarts/deploys do container
+class SqliteSessionStore extends session.Store {
+  constructor(database) {
+    super();
+    this.db = database;
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS sessions (
+        sid TEXT PRIMARY KEY,
+        sess TEXT NOT NULL,
+        expire INTEGER NOT NULL
+      )
+    `);
+    setInterval(() => {
+      try { this.db.prepare('DELETE FROM sessions WHERE expire < ?').run(Date.now()); } catch {}
+    }, 60 * 60 * 1000).unref();
+  }
+  get(sid, cb) {
+    try {
+      const row = this.db.prepare('SELECT sess, expire FROM sessions WHERE sid = ?').get(sid);
+      if (!row || row.expire < Date.now()) return cb(null, null);
+      cb(null, JSON.parse(row.sess));
+    } catch (e) { cb(e); }
+  }
+  set(sid, sess, cb) {
+    try {
+      const maxAge = sess.cookie && sess.cookie.maxAge ? sess.cookie.maxAge : 30 * 24 * 60 * 60 * 1000;
+      this.db.prepare(`
+        INSERT INTO sessions (sid, sess, expire) VALUES (?, ?, ?)
+        ON CONFLICT(sid) DO UPDATE SET sess = excluded.sess, expire = excluded.expire
+      `).run(sid, JSON.stringify(sess), Date.now() + maxAge);
+      if (cb) cb(null);
+    } catch (e) { if (cb) cb(e); }
+  }
+  destroy(sid, cb) {
+    try {
+      this.db.prepare('DELETE FROM sessions WHERE sid = ?').run(sid);
+      if (cb) cb(null);
+    } catch (e) { if (cb) cb(e); }
+  }
+  touch(sid, sess, cb) {
+    this.set(sid, sess, cb);
+  }
+}
+
 app.use(session({
+  store: new SqliteSessionStore(db),
   secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
@@ -104,7 +149,13 @@ app.get('/', (req, res) => {
 // Usuário logado
 app.get('/api/me', (req, res) => {
   const user = db.prepare('SELECT username, created_at FROM users WHERE id = ?').get(req.session.userId);
-  res.json({ username: req.session.username, created_at: user ? user.created_at : null });
+  const counts = followCounts(req.session.userId);
+  res.json({
+    username: req.session.username,
+    created_at: user ? user.created_at : null,
+    followers: counts.followers,
+    following: counts.following,
+  });
 });
 
 // Listar todas as medições ordenadas por data
@@ -419,6 +470,11 @@ app.post('/api/progressao/session', (req, res) => {
   if (clean.length === 0) return res.status(400).json({ error: 'Informe o peso de pelo menos uma série' });
 
   const uid = req.session.userId;
+  const before = progressSnapshot(uid);
+  const prevMax = db.prepare(
+    'SELECT COALESCE(MAX(weight), 0) w FROM progressao_carga WHERE user_id = ? AND exercise = ?'
+  ).get(uid, exercise).w;
+
   const tx = db.transaction(() => {
     db.prepare('DELETE FROM progressao_carga WHERE user_id = ? AND exercise = ? AND date = ?')
       .run(uid, exercise, date);
@@ -434,6 +490,14 @@ app.post('/api/progressao/session', (req, res) => {
     `).run(top, uid, exercise);
   });
   tx();
+
+  const top = Math.max(...clean.map(s => s.weight));
+  if (prevMax > 0 && top > prevMax) {
+    notify(uid, 'pr', `pr:${exercise}:${top}`, '🏆', `Novo recorde no ${exercise}!`,
+      `${String(top).replace('.', ',')} kg — seu recorde anterior era ${String(prevMax).replace('.', ',')} kg.`);
+  }
+  emitProgressNotifs(uid, before);
+
   res.status(201).json({ saved: clean.length, date });
 });
 
@@ -576,14 +640,103 @@ app.post('/api/workout-log/toggle', (req, res) => {
     db.prepare('DELETE FROM workout_log WHERE id = ?').run(existing.id);
     return res.json({ done: false });
   }
+  const before = progressSnapshot(req.session.userId);
   db.prepare('INSERT INTO workout_log (user_id, date, plan_item_id) VALUES (?, ?, ?)')
     .run(req.session.userId, date, plan_item_id);
+  emitProgressNotifs(req.session.userId, before);
   res.json({ done: true });
 });
 
 // Gamificação: XP, nível e estatísticas
 const XP_PER_EXERCISE = 10;
 const XP_DAY_BONUS = 30;
+const RANKS = ['Frango', 'Iniciante', 'Aprendiz', 'Consistente', 'Dedicado', 'Casca Grossa', 'Maromba', 'Fibrado', 'Trincado', 'Monstro', 'Lenda'];
+
+// ======== NOTIFICAÇÕES ========
+
+function notify(userId, kind, ref, icon, title, body) {
+  try {
+    db.prepare(`
+      INSERT OR IGNORE INTO notifications (user_id, kind, ref, icon, title, body)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(userId, kind, String(ref || ''), icon, title, body || '');
+  } catch { /* nunca derruba a ação principal */ }
+}
+
+function weekRange() {
+  const now = new Date();
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  return { start: monday.toLocaleDateString('en-CA'), end: sunday.toLocaleDateString('en-CA') };
+}
+
+function weekXpAll() {
+  const { start, end } = weekRange();
+  return db.prepare('SELECT id, username FROM users').all().map(u => {
+    const g = computeGami(u.id);
+    const weekLogs = db.prepare(
+      'SELECT COUNT(*) n FROM workout_log WHERE user_id = ? AND date >= ? AND date <= ?'
+    ).get(u.id, start, end).n;
+    const weekBonus = g.completeDates.filter(d => d >= start && d <= end).length * XP_DAY_BONUS;
+    return { id: u.id, username: u.username, gami: g, weekXp: weekLogs * XP_PER_EXERCISE + weekBonus };
+  });
+}
+
+// Compara estado antes/depois de uma ação e gera notificações
+function progressSnapshot(uid) {
+  return {
+    level: computeGami(uid).level,
+    unlocked: new Set(buildAchievements(uid).filter(a => a.unlocked).map(a => a.id)),
+    week: weekXpAll(),
+  };
+}
+
+function emitProgressNotifs(uid, before) {
+  const g = computeGami(uid);
+  // Subiu de nível
+  if (g.level > before.level) {
+    const rank = RANKS[Math.min(g.level - 1, RANKS.length - 1)];
+    notify(uid, 'nivel', `lvl:${g.level}`, '⬆️', `Você subiu para o nível ${g.level}!`, `Novo rank: ${rank}. Continua assim! 💪`);
+  }
+  // Conquistas novas
+  buildAchievements(uid).filter(a => a.unlocked && !before.unlocked.has(a.id)).forEach(a => {
+    notify(uid, 'conquista', a.id, a.icon, `Conquista desbloqueada: ${a.title}`, a.desc);
+  });
+  // Ultrapassagens no ranking da semana
+  const after = weekXpAll();
+  const meBefore = before.week.find(u => u.id === uid);
+  const meAfter = after.find(u => u.id === uid);
+  const myName = meAfter ? meAfter.username : '';
+  if (meBefore && meAfter) {
+    const today = new Date().toLocaleDateString('en-CA');
+    after.forEach(u => {
+      if (u.id === uid) return;
+      const uBefore = before.week.find(x => x.id === u.id);
+      if (!uBefore) return;
+      const wasAhead = uBefore.weekXp >= meBefore.weekXp && uBefore.weekXp > 0;
+      const nowBehind = u.weekXp < meAfter.weekXp;
+      if (wasAhead && nowBehind) {
+        notify(u.id, 'ranking', `ovr:${today}:${myName}`, '🏃', `${myName} passou você no ranking!`, 'Bora treinar pra recuperar a posição no ranking da semana.');
+      }
+    });
+  }
+}
+
+app.get('/api/notifications', (req, res) => {
+  const uid = req.session.userId;
+  const items = db.prepare(
+    'SELECT id, icon, title, body, created_at, read FROM notifications WHERE user_id = ? ORDER BY id DESC LIMIT 30'
+  ).all(uid);
+  const unread = db.prepare('SELECT COUNT(*) n FROM notifications WHERE user_id = ? AND read = 0').get(uid).n;
+  res.json({ unread, items });
+});
+
+app.post('/api/notifications/read-all', (req, res) => {
+  db.prepare('UPDATE notifications SET read = 1 WHERE user_id = ?').run(req.session.userId);
+  res.json({ success: true });
+});
 
 function weekdayOf(dateStr) {
   // 0=Seg ... 6=Dom
@@ -700,6 +853,222 @@ app.delete('/api/photos/:id', (req, res) => {
     .run(req.params.id, req.session.userId);
   if (result.changes === 0) return res.status(404).json({ error: 'Foto não encontrada' });
   res.json({ success: true });
+});
+
+// ======== CONQUISTAS, RECORDES E RETROSPECTIVA ========
+
+function mondayOf(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  return d.toLocaleDateString('en-CA');
+}
+
+// Recorde (maior carga) de cada exercício com a data em que saiu
+function prsFor(uid) {
+  return db.prepare(`
+    SELECT pc.exercise, pc.weight, MIN(pc.date) AS date
+    FROM progressao_carga pc
+    JOIN (
+      SELECT exercise, MAX(weight) AS mw FROM progressao_carga WHERE user_id = ? GROUP BY exercise
+    ) m ON m.exercise = pc.exercise AND m.mw = pc.weight
+    WHERE pc.user_id = ?
+    GROUP BY pc.exercise
+    ORDER BY pc.weight DESC
+  `).all(uid, uid);
+}
+
+app.get('/api/prs', (req, res) => {
+  res.json(prsFor(req.session.userId));
+});
+
+function buildAchievements(uid) {
+  const g = computeGami(uid);
+  const logCount = db.prepare('SELECT COUNT(*) n FROM workout_log WHERE user_id = ?').get(uid).n;
+  const maxW = db.prepare('SELECT COALESCE(MAX(weight), 0) w FROM progressao_carga WHERE user_id = ?').get(uid).w;
+  const volume = db.prepare(
+    'SELECT COALESCE(SUM(weight * reps), 0) v FROM progressao_carga WHERE user_id = ? AND set_number >= 1'
+  ).get(uid).v;
+  const fotos = db.prepare('SELECT COUNT(*) n FROM progress_photos WHERE user_id = ?').get(uid).n;
+  const meds = db.prepare('SELECT COUNT(*) n FROM measurements WHERE user_id = ?').get(uid).n;
+
+  // Melhor sequência de água (dias batendo a meta)
+  const wcfg = getWaterConfig(uid);
+  const goalBottles = wcfg.daily_goal_ml / wcfg.bottle_size_ml;
+  const metDates = db.prepare('SELECT date FROM water_intake WHERE user_id = ? AND bottles >= ? ORDER BY date ASC')
+    .all(uid, goalBottles).map(r => r.date);
+  let waterBest = 0;
+  let ws = 0;
+  for (let i = 0; i < metDates.length; i++) {
+    if (i > 0 && (new Date(metDates[i]) - new Date(metDates[i - 1])) === 86400000) ws++;
+    else ws = 1;
+    if (ws > waterBest) waterBest = ws;
+  }
+
+  // Semana perfeita: alguma semana com dia completo em todos os dias planejados
+  const plannedWds = db.prepare('SELECT DISTINCT weekday FROM plan_items WHERE user_id = ?').all(uid).map(r => r.weekday);
+  const byWeek = {};
+  g.completeDates.forEach(d => {
+    const wk = mondayOf(d);
+    (byWeek[wk] = byWeek[wk] || new Set()).add(weekdayOf(d));
+  });
+  const perfectWeek = plannedWds.length > 0 &&
+    Object.values(byWeek).some(s => plannedWds.every(w => s.has(w)));
+
+  const A = (id, icon, title, desc, unlocked, progress) =>
+    ({ id, icon, title, desc, unlocked: !!unlocked, ...(progress || {}) });
+
+  return [
+    A('first', '🏁', 'Primeiro passo', 'Conclua seu primeiro exercício', logCount >= 1),
+    A('week', '✅', 'Semana perfeita', 'Complete todos os dias do plano em uma semana', perfectWeek),
+    A('day10', '🔥', 'Dez dias', '10 dias de treino completos', g.completeDays >= 10, { value: Math.min(g.completeDays, 10), target: 10 }),
+    A('day50', '💪', 'Cinquentão', '50 dias de treino completos', g.completeDays >= 50, { value: Math.min(g.completeDays, 50), target: 50 }),
+    A('day100', '🏛️', 'Centurião', '100 dias de treino completos', g.completeDays >= 100, { value: Math.min(g.completeDays, 100), target: 100 }),
+    A('lvl5', '⭐', 'Nível 5', 'Alcance o nível 5 (Dedicado)', g.level >= 5, { value: Math.min(g.level, 5), target: 5 }),
+    A('lvl10', '🌟', 'Nível 10', 'Alcance o nível 10 (Monstro)', g.level >= 10, { value: Math.min(g.level, 10), target: 10 }),
+    A('kg100', '🐘', 'Clube dos 100', 'Registre 100 kg ou mais em um exercício', maxW >= 100, { value: Math.min(Math.round(maxW), 100), target: 100 }),
+    A('vol10', '🚛', '10 toneladas', 'Mova 10.000 kg somando todas as séries', volume >= 10000, { value: Math.min(Math.round(volume), 10000), target: 10000 }),
+    A('agua7', '💧', 'Hidratado', '7 dias seguidos batendo a meta de água', waterBest >= 7, { value: Math.min(waterBest, 7), target: 7 }),
+    A('foto', '📸', 'Shape check', 'Registre sua primeira foto de progresso', fotos >= 1),
+    A('med3', '📏', 'Sob medida', 'Registre 3 medições corporais', meds >= 3, { value: Math.min(meds, 3), target: 3 }),
+  ];
+}
+
+app.get('/api/achievements', (req, res) => {
+  res.json(buildAchievements(req.session.userId));
+});
+
+function followCounts(uid) {
+  return {
+    followers: db.prepare('SELECT COUNT(*) n FROM follows WHERE followed_id = ?').get(uid).n,
+    following: db.prepare('SELECT COUNT(*) n FROM follows WHERE follower_id = ?').get(uid).n,
+  };
+}
+
+// Perfil público: só informações de treino/gamificação, nada pessoal
+app.get('/api/users/:username/public', (req, res) => {
+  const u = db.prepare('SELECT id, username, created_at FROM users WHERE username = ?').get(req.params.username);
+  if (!u) return res.status(404).json({ error: 'Usuário não encontrado' });
+  const g = computeGami(u.id);
+  const profile = db.prepare('SELECT avatar FROM profile WHERE user_id = ?').get(u.id);
+  const counts = followCounts(u.id);
+  const isFollowing = !!db.prepare('SELECT 1 FROM follows WHERE follower_id = ? AND followed_id = ?')
+    .get(req.session.userId, u.id);
+  res.json({
+    username: u.username,
+    created_at: u.created_at,
+    avatar: (profile && profile.avatar) || '',
+    level: g.level,
+    xp: g.xp,
+    completeDays: g.completeDays,
+    totalExercises: g.totalExercises,
+    achievements: buildAchievements(u.id).filter(a => a.unlocked),
+    prs: prsFor(u.id).slice(0, 8),
+    followers: counts.followers,
+    following: counts.following,
+    isFollowing,
+    isMe: u.id === req.session.userId,
+  });
+});
+
+// Seguir / deixar de seguir (toggle)
+app.post('/api/users/:username/follow', (req, res) => {
+  const u = db.prepare('SELECT id, username FROM users WHERE username = ?').get(req.params.username);
+  if (!u) return res.status(404).json({ error: 'Usuário não encontrado' });
+  const me = req.session.userId;
+  if (u.id === me) return res.status(400).json({ error: 'Você não pode seguir a si mesmo' });
+
+  const existing = db.prepare('SELECT 1 FROM follows WHERE follower_id = ? AND followed_id = ?').get(me, u.id);
+  if (existing) {
+    db.prepare('DELETE FROM follows WHERE follower_id = ? AND followed_id = ?').run(me, u.id);
+  } else {
+    db.prepare('INSERT OR IGNORE INTO follows (follower_id, followed_id) VALUES (?, ?)').run(me, u.id);
+    const myName = db.prepare('SELECT username FROM users WHERE id = ?').get(me).username;
+    notify(u.id, 'follow', `f:${myName}`, '🫡', `${myName} começou a seguir você`, 'Agora seus recordes têm plateia. Bora treinar!');
+  }
+  res.json({ isFollowing: !existing, ...followCounts(u.id) });
+});
+
+// Retrospectiva dos últimos 30 dias (estilo wrapped)
+app.get('/api/wrapped', (req, res) => {
+  const uid = req.session.userId;
+  const DAYS = 30;
+  const end = new Date();
+  const start = new Date(end);
+  start.setDate(end.getDate() - (DAYS - 1));
+  const s = start.toLocaleDateString('en-CA');
+  const e = end.toLocaleDateString('en-CA');
+
+  const g = computeGami(uid);
+  const logs = db.prepare('SELECT date FROM workout_log WHERE user_id = ? AND date >= ? AND date <= ?').all(uid, s, e);
+  const treinos = new Set(logs.map(l => l.date)).size;
+  const completeInPeriod = g.completeDates.filter(d => d >= s && d <= e).length;
+  const xp = logs.length * XP_PER_EXERCISE + completeInPeriod * XP_DAY_BONUS;
+
+  const volume = db.prepare(
+    'SELECT COALESCE(SUM(weight * reps), 0) v FROM progressao_carga WHERE user_id = ? AND set_number >= 1 AND date >= ? AND date <= ?'
+  ).get(uid, s, e).v;
+
+  // Exercício que mais evoluiu no período (delta do top set diário)
+  const prog = db.prepare(
+    'SELECT exercise, date, MAX(weight) AS w FROM progressao_carga WHERE user_id = ? AND date >= ? AND date <= ? GROUP BY exercise, date ORDER BY exercise, date'
+  ).all(uid, s, e);
+  const byEx = {};
+  prog.forEach(r => { (byEx[r.exercise] = byEx[r.exercise] || []).push(r.w); });
+  let topEx = null;
+  for (const [name, ws] of Object.entries(byEx)) {
+    if (ws.length < 2) continue;
+    const delta = ws[ws.length - 1] - ws[0];
+    if (!topEx || delta > topEx.delta) topEx = { name, delta };
+  }
+
+  const rec = db.prepare(
+    'SELECT exercise, MAX(weight) AS weight FROM progressao_carga WHERE user_id = ? AND date >= ? AND date <= ?'
+  ).get(uid, s, e);
+
+  const wcfg = getWaterConfig(uid);
+  const aguaMl = db.prepare(
+    'SELECT COALESCE(SUM(bottles), 0) b FROM water_intake WHERE user_id = ? AND date >= ? AND date <= ?'
+  ).get(uid, s, e).b * wcfg.bottle_size_ml;
+
+  // Séries e reps do período (linhas por série)
+  const sr = db.prepare(
+    'SELECT COUNT(*) AS sets, COALESCE(SUM(reps), 0) AS reps FROM progressao_carga WHERE user_id = ? AND set_number >= 1 AND date >= ? AND date <= ?'
+  ).get(uid, s, e);
+
+  // Melhor sequência de dias seguidos e dia favorito no período
+  const dates = [...new Set(logs.map(l => l.date))].sort();
+  let bestStreak = 0;
+  let st = 0;
+  dates.forEach((d, i) => {
+    st = i > 0 && (new Date(d) - new Date(dates[i - 1])) === 86400000 ? st + 1 : 1;
+    if (st > bestStreak) bestStreak = st;
+  });
+  const wdCount = {};
+  dates.forEach(d => {
+    const w = weekdayOf(d);
+    wdCount[w] = (wdCount[w] || 0) + 1;
+  });
+  let favDay = null;
+  for (const [w, count] of Object.entries(wdCount)) {
+    if (!favDay || count > favDay.count) favDay = { weekday: +w, count };
+  }
+
+  res.json({
+    days: DAYS,
+    treinos,
+    exercicios: logs.length,
+    xp,
+    volumeKg: Math.round(volume),
+    sets: sr.sets,
+    reps: sr.reps,
+    bestStreak,
+    favDay,
+    topEx,
+    record: rec && rec.weight ? { exercise: rec.exercise, weight: rec.weight } : null,
+    aguaL: +(aguaMl / 1000).toFixed(1),
+    level: g.level,
+    completeDays: completeInPeriod,
+  });
 });
 
 app.listen(PORT, () => {

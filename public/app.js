@@ -732,16 +732,65 @@ profileForm.addEventListener('submit', async e => {
 let meData = null;
 
 async function loadPerfilPage() {
-  const [p, me, gami, tstats, wstats] = await Promise.all([
+  const [p, me, gami, tstats, wstats, conq, prs] = await Promise.all([
     api('GET', '/api/profile'),
     api('GET', '/api/me'),
     api('GET', '/api/gamification'),
     api('GET', '/api/treino/stats'),
     api('GET', '/api/water-intake/stats'),
+    api('GET', '/api/achievements'),
+    api('GET', '/api/prs'),
   ]);
   profileData = p;
   meData = me;
   renderPerfilPage(gami, tstats, wstats);
+  renderConquistas(conq);
+  renderPRs(prs);
+}
+
+function renderConquistas(list) {
+  const grid = document.getElementById('conq-grid');
+  if (!grid) return;
+  const unlocked = list.filter(c => c.unlocked).length;
+  document.getElementById('conq-sub').textContent = `${unlocked} de ${list.length} desbloqueadas`;
+  grid.innerHTML = '';
+  list.forEach(c => {
+    const el = document.createElement('div');
+    el.className = 'conq' + (c.unlocked ? ' unlocked' : '');
+    const prog = !c.unlocked && c.target
+      ? `<div class="conq-bar"><div class="conq-bar-fill" style="width:${Math.min(100, (c.value / c.target) * 100)}%"></div></div>
+         <span class="conq-progress">${c.value.toLocaleString('pt-BR')} / ${c.target.toLocaleString('pt-BR')}</span>`
+      : '';
+    el.innerHTML = `
+      <span class="conq-icon">${c.unlocked ? c.icon : '🔒'}</span>
+      <span class="conq-title">${esc(c.title)}</span>
+      <span class="conq-desc">${esc(c.desc)}</span>
+      ${prog}
+    `;
+    grid.appendChild(el);
+  });
+  animateIn(grid.children, 0.03);
+}
+
+function renderPRs(list) {
+  const el = document.getElementById('pr-list');
+  const empty = document.getElementById('pr-empty');
+  if (!el) return;
+  empty.style.display = list.length ? 'none' : '';
+  el.innerHTML = '';
+  const medals = ['🥇', '🥈', '🥉'];
+  list.forEach((r, i) => {
+    const row = document.createElement('div');
+    row.className = 'pr-row';
+    row.innerHTML = `
+      <span class="pr-pos">${medals[i] || ''}</span>
+      <span class="pr-name">${esc(r.exercise)}</span>
+      <span class="pr-date">${formatShortDate(r.date)}</span>
+      <span class="pr-weight">${String(r.weight).replace('.', ',')} kg</span>
+    `;
+    el.appendChild(row);
+  });
+  animateIn(el.children, 0.025);
 }
 
 function imcInfo(peso, alturaCm) {
@@ -764,6 +813,11 @@ function renderPerfilPage(gami, tstats, wstats) {
     sinceEl.textContent = `Membro desde ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`;
   } else {
     sinceEl.textContent = '';
+  }
+  const fcEl = document.getElementById('perfil-follow-counts');
+  if (fcEl && meData) {
+    const f = meData.followers || 0;
+    fcEl.textContent = `${f} ${f === 1 ? 'seguidor' : 'seguidores'} · ${meData.following || 0} seguindo`;
   }
 
   if (gami) {
@@ -1036,10 +1090,11 @@ async function migrateProfile() {
 // ======== TAB SWITCHING ========
 const TAB_TITLES = {
   hoje: 'Hoje',
-  medicoes: 'Medições',
+  medicoes: 'Corpo',
   agua: 'Água',
-  treino: 'Treino',
-  ciclo: 'Treino da Semana',
+  treino: 'Frequência',
+  ciclo: 'Treino',
+  avisos: 'Notificações',
   perfil: 'Perfil',
 };
 
@@ -1079,7 +1134,9 @@ document.querySelectorAll('.nav-btn[data-tab]').forEach(btn => {
     if (tab === 'agua') loadWaterData();
     if (tab === 'treino') loadTreinoData();
     if (tab === 'ciclo') loadCicloData();
+    if (tab === 'avisos') loadNotifs();
     if (tab === 'perfil') loadPerfilPage();
+    if (tab !== 'avisos') refreshNotifBadge();
     if (window.innerWidth <= 800) {
       document.querySelector('.app-shell').classList.remove('sidebar-open');
     }
@@ -2506,10 +2563,123 @@ function renderRanking(list) {
       <span class="rank-level">Nível ${u.level}</span>
       <span class="rank-xp">+${u.weekXp} XP</span>
     `;
+    row.title = u.isMe ? 'Ver meu perfil' : `Ver perfil de ${u.username}`;
+    row.addEventListener('click', () => {
+      if (u.isMe) document.getElementById('btn-profile').click();
+      else openPublicProfile(u.username);
+    });
     el.appendChild(row);
   });
   animateIn(el.children, 0.05);
 }
+
+// ---- Perfil público (página, aberta pelo ranking) ----
+let pubUser = null;
+let lastTabBeforeUser = 'hoje';
+
+function renderFollowState(u) {
+  document.getElementById('pub-counts').textContent =
+    `${u.followers} ${u.followers === 1 ? 'seguidor' : 'seguidores'} · ${u.following} seguindo`;
+  const btn = document.getElementById('btn-pub-follow');
+  btn.style.display = u.isMe ? 'none' : '';
+  btn.textContent = u.isFollowing ? 'Seguindo ✓' : 'Seguir';
+  btn.className = u.isFollowing ? 'btn-secondary btn-sm' : 'btn-primary btn-sm';
+}
+
+async function openPublicProfile(username) {
+  const res = await fetch(`/api/users/${encodeURIComponent(username)}/public`);
+  if (!res.ok) {
+    toastMsg('Não foi possível carregar o perfil');
+    return;
+  }
+  const u = await res.json();
+  pubUser = u;
+  renderFollowState(u);
+
+  document.getElementById('pub-name').textContent = u.username;
+  const sinceEl = document.getElementById('pub-since');
+  if (u.created_at) {
+    const d = new Date(u.created_at.replace(' ', 'T') + 'Z');
+    sinceEl.textContent = `Membro desde ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`;
+  } else {
+    sinceEl.textContent = '';
+  }
+  document.getElementById('pub-rank').textContent =
+    `Nível ${u.level} · ${RANKS[Math.min(u.level - 1, RANKS.length - 1)]}`;
+  document.getElementById('pub-xp').textContent = `${u.xp.toLocaleString('pt-BR')} XP`;
+
+  const pic = document.getElementById('pub-pic');
+  pic.classList.toggle('has-photo', !!u.avatar);
+  pic.style.backgroundImage = u.avatar ? `url(${u.avatar})` : '';
+
+  document.getElementById('pub-days').textContent = u.completeDays;
+  document.getElementById('pub-ex').textContent = u.totalExercises;
+  document.getElementById('pub-conq-count').textContent = u.achievements.length;
+
+  const conqEl = document.getElementById('pub-conq');
+  conqEl.innerHTML = '';
+  if (u.achievements.length === 0) {
+    conqEl.innerHTML = '<p class="profile-hint">Nenhuma conquista ainda.</p>';
+  } else {
+    u.achievements.forEach(a => {
+      const chip = document.createElement('span');
+      chip.className = 'pub-conq-chip';
+      chip.title = a.desc;
+      chip.innerHTML = `${a.icon} ${esc(a.title)}`;
+      conqEl.appendChild(chip);
+    });
+  }
+
+  const prsEl = document.getElementById('pub-prs');
+  const emptyEl = document.getElementById('pub-empty');
+  prsEl.innerHTML = '';
+  emptyEl.style.display = u.prs.length ? 'none' : '';
+  const medals2 = ['🥇', '🥈', '🥉'];
+  u.prs.forEach((r, i) => {
+    const row = document.createElement('div');
+    row.className = 'pr-row';
+    row.innerHTML = `
+      <span class="pr-pos">${medals2[i] || ''}</span>
+      <span class="pr-name">${esc(r.exercise)}</span>
+      <span class="pr-date">${formatShortDate(r.date)}</span>
+      <span class="pr-weight">${String(r.weight).replace('.', ',')} kg</span>
+    `;
+    prsEl.appendChild(row);
+  });
+
+  // Navega para a página do usuário (estilo WhatsApp)
+  const activeNav = document.querySelector('.nav-btn[data-tab].active');
+  if (activeNav) lastTabBeforeUser = activeNav.dataset.tab;
+  document.querySelectorAll('.nav-btn[data-tab]').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  const panel = document.getElementById('tab-user');
+  panel.classList.add('active');
+  panel.classList.remove('panel-enter');
+  void panel.offsetWidth;
+  panel.classList.add('panel-enter');
+  document.getElementById('page-title').textContent = u.username;
+  updateHeaderActions('user');
+  window.scrollTo(0, 0);
+
+  animateIn(conqEl.children, 0.03);
+  animateIn(prsEl.children, 0.03);
+}
+
+document.getElementById('btn-user-back').addEventListener('click', () => {
+  const target = document.querySelector(`.nav-btn[data-tab="${lastTabBeforeUser}"]`)
+    || document.querySelector('.nav-btn[data-tab="hoje"]');
+  target.click();
+});
+
+document.getElementById('btn-pub-follow').addEventListener('click', async () => {
+  if (!pubUser || pubUser.isMe) return;
+  const r = await api('POST', `/api/users/${encodeURIComponent(pubUser.username)}/follow`, {});
+  pubUser.isFollowing = r.isFollowing;
+  pubUser.followers = r.followers;
+  pubUser.following = r.following;
+  renderFollowState(pubUser);
+  toastMsg(r.isFollowing ? `Seguindo ${pubUser.username}! 🫡` : `Você deixou de seguir ${pubUser.username}`);
+});
 
 // ======== LEMBRETES ========
 const REM_KEY = 'gym_reminders';
@@ -2692,6 +2862,414 @@ document.getElementById('photo-input').addEventListener('change', e => {
   };
   img.src = URL.createObjectURL(file);
   e.target.value = '';
+});
+
+// ======== NOTIFICAÇÕES (feed interno) ========
+function timeAgo(sqlDate) {
+  const d = new Date(sqlDate.replace(' ', 'T') + 'Z');
+  const s = (Date.now() - d.getTime()) / 1000;
+  if (s < 60) return 'agora';
+  if (s < 3600) return `há ${Math.floor(s / 60)} min`;
+  if (s < 86400) return `há ${Math.floor(s / 3600)} h`;
+  if (s < 7 * 86400) return `há ${Math.floor(s / 86400)} d`;
+  return formatShortDate(sqlDate.slice(0, 10));
+}
+
+async function refreshNotifBadge() {
+  try {
+    const data = await api('GET', '/api/notifications');
+    const badge = document.getElementById('notif-badge');
+    if (!badge) return;
+    badge.hidden = !data.unread;
+    badge.textContent = data.unread > 9 ? '9+' : data.unread;
+  } catch { /* silencioso */ }
+}
+
+async function loadNotifs() {
+  const data = await api('GET', '/api/notifications');
+  const list = document.getElementById('notif-list');
+  const empty = document.getElementById('notif-empty');
+  document.getElementById('avisos-sub').textContent =
+    data.unread ? `${data.unread} ${data.unread === 1 ? 'nova' : 'novas'}` : '';
+  empty.style.display = data.items.length ? 'none' : '';
+  list.innerHTML = '';
+  data.items.forEach(n => {
+    const row = document.createElement('div');
+    row.className = 'notif-row' + (n.read ? '' : ' unread');
+    row.innerHTML = `
+      <span class="notif-icon">${n.icon}</span>
+      <span class="notif-txt">
+        <span class="notif-title">${esc(n.title)}</span>
+        ${n.body ? `<span class="notif-body">${esc(n.body)}</span>` : ''}
+      </span>
+      <span class="notif-time">${timeAgo(n.created_at)}</span>
+    `;
+    list.appendChild(row);
+  });
+  animateIn(list.children, 0.03);
+
+  if (data.unread) {
+    await api('POST', '/api/notifications/read-all');
+    setTimeout(refreshNotifBadge, 300);
+  }
+}
+
+setInterval(refreshNotifBadge, 60 * 1000);
+refreshNotifBadge();
+
+// ======== RETROSPECTIVA (estilo wrapped, com variações) ========
+const modalWrapped = document.getElementById('modal-wrapped');
+let wrappedData = null;
+let wrappedAvatar = null;
+let wrappedVariant = 'treino';
+
+function wrappedFmt(n) {
+  return Number(n).toLocaleString('pt-BR');
+}
+
+// Dados da variação "meta de peso" (a partir do perfil + medições já carregados)
+function wrappedMetaInfo() {
+  const meta = profileData && profileData.peso_meta != null ? Number(profileData.peso_meta) : null;
+  const withPeso = measurements.filter(m => m.peso != null);
+  if (!meta || withPeso.length === 0) return null;
+
+  const atual = withPeso[withPeso.length - 1].peso;
+  const diff = atual - meta; // > 0: perder; < 0: ganhar
+  const falta = Math.abs(diff);
+  const reached = falta <= 0.05;
+
+  // Variação de peso nos últimos 30 dias (fallback: desde o início)
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 30);
+  const cutStr = cutoff.toLocaleDateString('en-CA');
+  const inPeriod = withPeso.filter(m => m.date >= cutStr);
+  const base = inPeriod.length >= 2 ? inPeriod : withPeso;
+  const periodDelta = base[base.length - 1].peso - base[0].peso;
+
+  // Progresso: do ponto mais distante já registrado até a meta
+  const maxDist = Math.max(...withPeso.map(m => Math.abs(m.peso - meta)));
+  let pct = maxDist > 0.05 ? (1 - falta / maxDist) * 100 : 100;
+  pct = Math.max(0, Math.min(100, pct));
+  if (reached) pct = 100;
+
+  const withCint = measurements.filter(m => m.cintura_umbigo != null);
+  const cintDelta = withCint.length >= 2
+    ? withCint[withCint.length - 1].cintura_umbigo - withCint[0].cintura_umbigo
+    : null;
+
+  return { meta, atual, falta, reached, dir: diff > 0 ? 'perder' : 'ganhar', pct, periodDelta, cintDelta };
+}
+
+function kgTxt(v) {
+  return String(+(+v).toFixed(1)).replace('.', ',');
+}
+
+// ---- Partes comuns do card ----
+function wrappedBase(ctx, W, H, subtitle) {
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+  ctx.lineWidth = 90;
+  [[W * 0.9, 180, 300], [80, H * 0.55, 260], [W * 0.85, H * 0.88, 340]].forEach(([x, y, r]) => {
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.stroke();
+  });
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#8e8e93';
+  ctx.font = '700 34px system-ui';
+  ctx.fillText('G Y M   E V O L U T I O N', W / 2, 130);
+  ctx.fillStyle = '#fff';
+  ctx.font = '800 92px system-ui';
+  ctx.fillText('Retrospectiva', W / 2, 235);
+  ctx.fillStyle = '#6b6b72';
+  ctx.font = '600 36px system-ui';
+  ctx.fillText(subtitle, W / 2, 295);
+}
+
+function wrappedIdentity(ctx, W, username, rankTxt) {
+  const center = W / 2;
+  let y = 420;
+  if (wrappedAvatar) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(center, y, 95, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.drawImage(wrappedAvatar, center - 95, y - 95, 190, 190);
+    ctx.restore();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(center, y, 95, 0, Math.PI * 2);
+    ctx.stroke();
+    y += 160;
+  } else {
+    y += 20;
+  }
+  ctx.fillStyle = '#fff';
+  ctx.font = '800 56px system-ui';
+  ctx.fillText(username, center, y);
+  y += 62;
+  ctx.font = '700 34px system-ui';
+  const tw = ctx.measureText(rankTxt).width;
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.roundRect(center - tw / 2 - 28, y - 40, tw + 56, 58, 29);
+  ctx.fill();
+  ctx.fillStyle = '#000';
+  ctx.fillText(rankTxt, center, y);
+  return y;
+}
+
+function wrappedStatsGrid(ctx, W, y, stats, rowH = 170) {
+  const colW = W / 2;
+  stats.forEach((s, i) => {
+    const cx = (i % 2) * colW + colW / 2;
+    const cy = y + Math.floor(i / 2) * rowH;
+    ctx.fillStyle = s[2] || '#fff';
+    ctx.font = '800 72px system-ui';
+    ctx.fillText(s[0], cx, cy);
+    ctx.fillStyle = '#6b6b72';
+    ctx.font = '600 34px system-ui';
+    ctx.fillText(s[1], cx, cy + 48);
+  });
+  return y + Math.ceil(stats.length / 2) * rowH;
+}
+
+// Equivalência divertida do peso movimentado
+function volumeEquiv(kg) {
+  const f = v => String(+v.toFixed(1)).replace('.', ',');
+  if (kg >= 6000) return `≈ ${f(kg / 6000)} elefantes 🐘`;
+  if (kg >= 840) return `≈ ${f(kg / 840)} Fuscas 🚗`;
+  if (kg >= 180) return `≈ ${Math.round(kg / 90)} pessoas de 90 kg 🧍`;
+  return `≈ ${Math.max(1, Math.round(kg / 13))} botijões de gás 🔥`;
+}
+
+function wrappedFooter(ctx, W, H) {
+  ctx.fillStyle = '#48484c';
+  ctx.font = '700 32px system-ui';
+  ctx.fillText('gym.genustech.com.br', W / 2, H - 70);
+}
+
+// ---- Variação 1: Treino (sem XP) ----
+function drawWrappedTreino() {
+  const c = document.getElementById('wrapped-canvas');
+  const ctx = c.getContext('2d');
+  const W = 1080;
+  const H = 1920;
+  const data = wrappedData;
+  const center = W / 2;
+  const username = (meData && meData.username) || '';
+  const rank = RANKS[Math.min((data.level || 1) - 1, RANKS.length - 1)];
+
+  wrappedBase(ctx, W, H, 'últimos 30 dias');
+  let y = wrappedIdentity(ctx, W, username, `Nível ${data.level} · ${rank}`);
+
+  y += 158;
+  ctx.fillStyle = '#fff';
+  ctx.font = '800 210px system-ui';
+  ctx.fillText(String(data.treinos), center, y);
+  y += 56;
+  ctx.fillStyle = '#8e8e93';
+  ctx.font = '700 44px system-ui';
+  ctx.fillText(data.treinos === 1 ? 'dia de treino' : 'dias de treino', center, y);
+
+  y += 85;
+  y = wrappedStatsGrid(ctx, W, y, [
+    [wrappedFmt(data.sets), 'séries feitas'],
+    [wrappedFmt(data.reps), 'reps no total'],
+    [wrappedFmt(data.volumeKg) + ' kg', 'movimentados'],
+    [`${data.bestStreak} ${data.bestStreak === 1 ? 'dia' : 'dias'} 🔥`, 'seguidos treinando'],
+  ], 150);
+
+  // Equivalência divertida do volume
+  if (data.volumeKg > 0) {
+    y += 38;
+    ctx.fillStyle = '#8e8e93';
+    ctx.font = '700 38px system-ui';
+    ctx.fillText(volumeEquiv(data.volumeKg), center, y);
+  }
+
+  // Seções com título (estilo wrapped)
+  const section = (title, content, contentColor, sub) => {
+    y += 80;
+    ctx.fillStyle = '#6b6b72';
+    ctx.font = '700 30px system-ui';
+    ctx.fillText(title, center, y);
+    y += 58;
+    ctx.fillStyle = contentColor || '#fff';
+    ctx.font = '800 52px system-ui';
+    ctx.fillText(content, center, y);
+    if (sub) {
+      y += 48;
+      ctx.fillStyle = '#8e8e93';
+      ctx.font = '700 38px system-ui';
+      ctx.fillText(sub, center, y);
+    }
+  };
+
+  if (data.topEx && data.topEx.delta > 0) {
+    section('E X E R C Í C I O   Q U E   M A I S   P R O G R E D I U',
+      `▲ ${data.topEx.name}`, '#30d158', `+${kgTxt(data.topEx.delta)} kg no período`);
+  }
+  if (data.record) {
+    section('R E C O R D E   D O   P E R Í O D O',
+      `🏆 ${data.record.exercise} · ${kgTxt(data.record.weight)} kg`);
+  }
+  if (data.favDay) {
+    section('D I A   F A V O R I T O',
+      `${WEEKDAY_NAMES[data.favDay.weekday]} · ${data.favDay.count} treinos`);
+  }
+
+  wrappedFooter(ctx, W, H);
+}
+
+// ---- Variação 2: Meta de peso ----
+function drawWrappedMeta() {
+  const c = document.getElementById('wrapped-canvas');
+  const ctx = c.getContext('2d');
+  const W = 1080;
+  const H = 1920;
+  const m = wrappedMetaInfo();
+  if (!m) return drawWrappedTreino();
+  const center = W / 2;
+  const username = (meData && meData.username) || '';
+  const rank = RANKS[Math.min((wrappedData.level || 1) - 1, RANKS.length - 1)];
+
+  wrappedBase(ctx, W, H, m.dir === 'perder' ? 'projeto secar 🔻' : 'projeto crescer 🔺');
+  let y = wrappedIdentity(ctx, W, username, `Nível ${wrappedData.level} · ${rank}`);
+
+  // Peso atual gigante
+  y += 190;
+  ctx.fillStyle = '#fff';
+  ctx.font = '800 190px system-ui';
+  ctx.fillText(kgTxt(m.atual), center, y);
+  ctx.font = '800 64px system-ui';
+  const numW = ctx.measureText(kgTxt(m.atual)).width;
+  y += 62;
+  ctx.fillStyle = '#8e8e93';
+  ctx.font = '700 44px system-ui';
+  ctx.fillText('kg atuais', center, y);
+
+  // Status da meta
+  y += 120;
+  if (m.reached) {
+    ctx.fillStyle = '#30d158';
+    ctx.font = '800 60px system-ui';
+    ctx.fillText('Meta atingida! 🎉', center, y);
+  } else {
+    ctx.fillStyle = '#30d158';
+    ctx.font = '800 60px system-ui';
+    ctx.fillText(`faltam ${kgTxt(m.falta)} kg`, center, y);
+    ctx.fillStyle = '#8e8e93';
+    ctx.font = '700 40px system-ui';
+    ctx.fillText(`para ${m.dir === 'perder' ? 'a meta de' : 'chegar aos'} ${kgTxt(m.meta)} kg`, center, y + 58);
+  }
+
+  // Barra de progresso
+  y += 150;
+  const barW = 760;
+  const barX = center - barW / 2;
+  ctx.fillStyle = '#232326';
+  ctx.beginPath();
+  ctx.roundRect(barX, y, barW, 26, 13);
+  ctx.fill();
+  ctx.fillStyle = m.reached ? '#30d158' : '#fff';
+  ctx.beginPath();
+  ctx.roundRect(barX, y, Math.max(26, barW * (m.pct / 100)), 26, 13);
+  ctx.fill();
+  ctx.fillStyle = '#6b6b72';
+  ctx.font = '600 32px system-ui';
+  ctx.textAlign = 'left';
+  ctx.fillText(`${m.pct.toFixed(0)}% do caminho`, barX, y + 78);
+  ctx.textAlign = 'right';
+  ctx.fillText(`meta ${kgTxt(m.meta)} kg`, barX + barW, y + 78);
+  ctx.textAlign = 'center';
+
+  // Stats do período
+  y += 210;
+  const deltaGood = m.dir === 'perder' ? m.periodDelta < 0 : m.periodDelta > 0;
+  const stats = [
+    [`${m.periodDelta > 0 ? '+' : ''}${kgTxt(m.periodDelta)} kg`, 'no período', deltaGood ? '#30d158' : '#ff9f0a'],
+    [wrappedFmt(wrappedData.treinos), 'dias de treino'],
+  ];
+  if (m.cintDelta != null && m.cintDelta !== 0) {
+    stats.push([`${m.cintDelta > 0 ? '+' : ''}${kgTxt(m.cintDelta)} cm`, 'de cintura', m.cintDelta < 0 ? '#30d158' : '#ff9f0a']);
+  }
+  stats.push([String(wrappedData.aguaL).replace('.', ',') + ' L', 'de água']);
+  wrappedStatsGrid(ctx, W, y, stats);
+
+  wrappedFooter(ctx, W, H);
+}
+
+function renderWrappedCanvas() {
+  if (wrappedVariant === 'meta') drawWrappedMeta();
+  else drawWrappedTreino();
+  document.querySelectorAll('.wrapped-tab').forEach(b => {
+    b.classList.toggle('active', b.dataset.v === wrappedVariant);
+  });
+}
+
+async function openWrapped() {
+  wrappedData = await api('GET', '/api/wrapped');
+  wrappedVariant = 'treino';
+
+  // Aba "Meta de peso" só aparece quando há meta definida + peso registrado
+  const metaTab = document.querySelector('.wrapped-tab[data-v="meta"]');
+  if (metaTab) metaTab.style.display = wrappedMetaInfo() ? '' : 'none';
+
+  const start = () => {
+    renderWrappedCanvas();
+    modalWrapped.classList.remove('hidden');
+  };
+
+  if (profileData && profileData.avatar) {
+    const img = new Image();
+    img.onload = () => { wrappedAvatar = img; start(); };
+    img.onerror = () => { wrappedAvatar = null; start(); };
+    img.src = profileData.avatar;
+  } else {
+    wrappedAvatar = null;
+    start();
+  }
+}
+
+document.querySelectorAll('.wrapped-tab').forEach(b => {
+  b.addEventListener('click', () => {
+    wrappedVariant = b.dataset.v;
+    renderWrappedCanvas();
+  });
+});
+
+document.getElementById('btn-wrapped').addEventListener('click', openWrapped);
+document.getElementById('btn-wrapped-close').addEventListener('click', () => modalWrapped.classList.add('hidden'));
+modalWrapped.addEventListener('click', e => { if (e.target === modalWrapped) modalWrapped.classList.add('hidden'); });
+
+function wrappedBlobPromise() {
+  return new Promise(resolve => document.getElementById('wrapped-canvas').toBlob(resolve, 'image/png'));
+}
+
+document.getElementById('btn-wrapped-share').addEventListener('click', async () => {
+  const blob = await wrappedBlobPromise();
+  const file = new File([blob], 'retrospectiva-gym.png', { type: 'image/png' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: 'Minha retrospectiva no treino' });
+    } catch { /* usuário cancelou */ }
+  } else {
+    document.getElementById('btn-wrapped-download').click();
+    toastMsg('Compartilhamento não suportado aqui — imagem baixada!');
+  }
+});
+
+document.getElementById('btn-wrapped-download').addEventListener('click', async () => {
+  const blob = await wrappedBlobPromise();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'retrospectiva-gym.png';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 });
 
 // Init
