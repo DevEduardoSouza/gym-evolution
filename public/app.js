@@ -1653,18 +1653,23 @@ function weekDates() {
   });
 }
 
+let cicloSummary = {};
+
 async function loadCicloData() {
   const dates = weekDates();
-  const [plan, logs, gami, library] = await Promise.all([
+  const [plan, logs, gami, library, summary] = await Promise.all([
     api('GET', '/api/plan'),
     api('GET', `/api/workout-log?start=${dates[0]}&end=${dates[6]}`),
     api('GET', '/api/gamification'),
     api('GET', '/api/library'),
+    api('GET', '/api/progressao/summary'),
   ]);
   cicloPlan = plan;
   cicloLogs = logs;
   cicloGami = gami;
   cicloLibrary = library;
+  cicloSummary = {};
+  summary.forEach(s => { cicloSummary[s.exercise] = s; });
   renderCiclo();
 }
 
@@ -1764,6 +1769,10 @@ function renderDay() {
     card.style.animationDelay = (idx * 0.045) + 's';
 
     const thumb = animThumb(p.image1, p.image2);
+    const sum = cicloSummary[p.name];
+    const lastTxt = sum
+      ? `${String(sum.top).replace('.', ',')} kg${sum.sets ? ' · ' + sum.sets + 's' : ''} <small>${formatShortDate(sum.date)}</small>`
+      : (p.current_weight != null ? String(p.current_weight).replace('.', ',') + ' kg' : '<small>registrar</small>');
 
     card.innerHTML = `
       <button class="ex-check" title="Concluir em ${formatDate(date)}">
@@ -1779,14 +1788,10 @@ function renderDay() {
           <span>Séries × Reps</span>
           <input class="ex-scheme" type="text" value="${esc(p.scheme)}" placeholder="3 × 10-12">
         </label>
-        <label class="ex-field">
-          <span>Carga (kg)</span>
-          <span class="ex-weight">
-            <button class="w-minus" type="button" title="-2,5 kg">−</button>
-            <input class="ex-weight-input" type="number" step="0.5" min="0" value="${p.current_weight != null ? p.current_weight : ''}" placeholder="0">
-            <button class="w-plus" type="button" title="+2,5 kg">+</button>
-          </span>
-        </label>
+        <button class="ex-field ex-last" type="button" title="Ver evolução e registrar séries">
+          <span>Último treino</span>
+          <span class="ex-last-val">${lastTxt}</span>
+        </button>
       </div>
       <button class="ex-remove" title="Remover do dia">&#10005;</button>
     `;
@@ -1804,24 +1809,7 @@ function renderDay() {
       p.scheme = e.target.value;
     });
 
-    const weightInput = card.querySelector('.ex-weight-input');
-    const saveWeight = async val => {
-      const num = parseFloat(val);
-      if (isNaN(num)) return;
-      await api('PUT', `/api/plan/${p.id}`, { current_weight: num });
-      p.current_weight = num;
-    };
-    weightInput.addEventListener('change', e => saveWeight(e.target.value));
-    card.querySelector('.w-minus').addEventListener('click', () => {
-      const v = Math.max(0, (parseFloat(weightInput.value) || 0) - 2.5);
-      weightInput.value = v;
-      saveWeight(v);
-    });
-    card.querySelector('.w-plus').addEventListener('click', () => {
-      const v = (parseFloat(weightInput.value) || 0) + 2.5;
-      weightInput.value = v;
-      saveWeight(v);
-    });
+    card.querySelector('.ex-last').addEventListener('click', () => openEvoModal(p));
 
     listEl.appendChild(card);
   });
@@ -1884,28 +1872,67 @@ if (!REDUCED_MOTION) {
 // ---- Evolução de carga por exercício ----
 const modalEvo = document.getElementById('modal-evo');
 let evoChartRows = [];
+let evoRawRows = [];
+let evoFilter = 'top';
+let evoItem = null;
 
-async function openEvoModal(p) {
-  const rows = await api('GET', `/api/progressao?exercise=${encodeURIComponent(p.name)}`);
-  evoChartRows = rows;
+// Série do gráfico conforme o filtro: top set (maior carga do dia) ou série específica
+function buildEvoSeries() {
+  const byDate = {};
+  evoRawRows.forEach(r => { (byDate[r.date] = byDate[r.date] || []).push(r); });
+  const dates = Object.keys(byDate).sort();
+  const out = [];
+  for (const d of dates) {
+    const rows = byDate[d];
+    if (evoFilter === 'top') {
+      const best = rows.reduce((a, b) => (b.weight > a.weight ? b : a));
+      out.push({ date: d, weight: best.weight, reps: best.reps || 0 });
+    } else {
+      const s = rows.find(r => r.set_number === evoFilter);
+      if (s) out.push({ date: d, weight: s.weight, reps: s.reps || 0 });
+    }
+  }
+  return out;
+}
 
-  document.getElementById('evoc-title').textContent = p.name;
-  const thumbEl = document.getElementById('evoc-thumb');
-  thumbEl.innerHTML = animThumb(p.image1, p.image2);
+function renderEvoFilter() {
+  const el = document.getElementById('evoc-filter');
+  el.innerHTML = '';
+  const maxSet = Math.max(0, ...evoRawRows.map(r => r.set_number || 0));
+  el.style.display = maxSet >= 1 ? '' : 'none';
+  const mk = (label, value) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'evoc-chip' + (evoFilter === value ? ' active' : '');
+    b.textContent = label;
+    b.addEventListener('click', () => {
+      evoFilter = value;
+      renderEvoFilter();
+      updateEvoStats();
+      animateEvoChart();
+    });
+    el.appendChild(b);
+  };
+  mk('Top set', 'top');
+  for (let n = 1; n <= maxSet; n++) mk(`Série ${n}`, n);
+}
 
-  const atual = rows.length ? rows[rows.length - 1].weight : (p.current_weight != null ? p.current_weight : null);
+function updateEvoStats() {
+  evoChartRows = buildEvoSeries();
+  const rows = evoChartRows;
+  const atual = rows.length ? rows[rows.length - 1].weight
+    : (evoItem && evoItem.current_weight != null ? evoItem.current_weight : null);
   const max = rows.length ? Math.max(...rows.map(r => r.weight)) : atual;
   const fmt = v => v != null ? String(v).replace('.', ',') : '—';
+
   const atualEl = document.getElementById('evoc-atual');
   const maxEl = document.getElementById('evoc-max');
   if (atual != null) {
-    atualEl.textContent = '0';
     countUp(atualEl, atual, { decimals: atual % 1 ? 1 : 0 });
   } else {
     atualEl.textContent = '—';
   }
   if (max != null) {
-    maxEl.textContent = '0';
     countUp(maxEl, max, { decimals: max % 1 ? 1 : 0 });
   } else {
     maxEl.textContent = '—';
@@ -1921,6 +1948,96 @@ async function openEvoModal(p) {
   } else {
     ganhoEl.textContent = '—';
   }
+}
+
+// ---- Registro da sessão de hoje (uma linha por série) ----
+function sessionPrefill() {
+  const byDate = {};
+  evoRawRows.filter(r => r.set_number >= 1).forEach(r => {
+    (byDate[r.date] = byDate[r.date] || []).push(r);
+  });
+  const dates = Object.keys(byDate).sort();
+  const src = byDate[todayStr()] || (dates.length ? byDate[dates[dates.length - 1]] : null);
+  if (src) {
+    return src.sort((a, b) => a.set_number - b.set_number)
+      .map(r => ({ weight: r.weight, reps: r.reps || '' }));
+  }
+  // Sem histórico por série: usa o nº de séries do esquema e a carga atual do card
+  const n = parseInt((evoItem && evoItem.scheme || '').trim(), 10) || 3;
+  const w = evoItem && evoItem.current_weight != null ? evoItem.current_weight : '';
+  return Array.from({ length: Math.min(Math.max(n, 1), 6) }, () => ({ weight: w, reps: '' }));
+}
+
+function addSessionRow(s = { weight: '', reps: '' }) {
+  const el = document.getElementById('evoc-sets');
+  const row = document.createElement('div');
+  row.className = 'set-row';
+  row.innerHTML = `
+    <span class="set-num"></span>
+    <input type="number" class="set-w" step="0.5" min="0" inputmode="decimal" placeholder="0" value="${s.weight !== '' && s.weight != null ? s.weight : ''}">
+    <span class="set-x">kg ×</span>
+    <input type="number" class="set-r" min="0" inputmode="numeric" placeholder="0" value="${s.reps || ''}">
+    <span class="set-x">reps</span>
+    <button type="button" class="set-del" title="Remover série">&#10005;</button>
+  `;
+  row.querySelector('.set-del').addEventListener('click', () => {
+    row.remove();
+    renumberSessionRows();
+  });
+  el.appendChild(row);
+}
+
+function renumberSessionRows() {
+  document.querySelectorAll('#evoc-sets .set-num').forEach((el, i) => {
+    el.textContent = `S${i + 1}`;
+  });
+}
+
+function renderSessionRows() {
+  const el = document.getElementById('evoc-sets');
+  el.innerHTML = '';
+  sessionPrefill().forEach(s => addSessionRow(s));
+  renumberSessionRows();
+}
+
+document.getElementById('btn-set-add').addEventListener('click', () => {
+  addSessionRow();
+  renumberSessionRows();
+});
+
+document.getElementById('btn-session-save').addEventListener('click', async () => {
+  const sets = [...document.querySelectorAll('#evoc-sets .set-row')].map(r => ({
+    weight: r.querySelector('.set-w').value,
+    reps: r.querySelector('.set-r').value,
+  })).filter(s => s.weight !== '' && parseFloat(s.weight) > 0);
+  if (!sets.length) {
+    toastMsg('Informe o peso de pelo menos uma série');
+    return;
+  }
+  await api('POST', '/api/progressao/session', { exercise: evoItem.name, date: todayStr(), sets });
+  toastMsg('Treino registrado! 💪');
+  evoRawRows = await api('GET', `/api/progressao?exercise=${encodeURIComponent(evoItem.name)}`);
+  renderEvoFilter();
+  updateEvoStats();
+  renderSessionRows();
+  animateEvoChart();
+  loadCicloData();
+});
+
+async function openEvoModal(p) {
+  evoItem = p;
+  evoFilter = 'top';
+  evoRawRows = await api('GET', `/api/progressao?exercise=${encodeURIComponent(p.name)}`);
+
+  document.getElementById('evoc-title').textContent = p.name;
+  document.getElementById('evoc-thumb').innerHTML = animThumb(p.image1, p.image2);
+  document.getElementById('evoc-atual').textContent = '0';
+  document.getElementById('evoc-max').textContent = '0';
+  document.getElementById('evoc-session-date').textContent = formatDate(todayStr());
+
+  renderEvoFilter();
+  updateEvoStats();
+  renderSessionRows();
 
   modalEvo.classList.remove('hidden');
   animateEvoChart();
@@ -1960,6 +2077,9 @@ function drawEvoChart(hoverIdx = -1, progress = 1) {
   const hasData = rows.length >= 2;
   canvas.style.display = hasData ? '' : 'none';
   emptyEl.style.display = hasData ? 'none' : '';
+  emptyEl.textContent = rows.length === 1
+    ? 'Primeiro registro feito! O gráfico aparece a partir do segundo treino. 💪'
+    : 'Sem histórico ainda. Registre o treino de hoje abaixo para começar o gráfico.';
   evoPoints = [];
   if (!hasData) return;
 
@@ -2047,7 +2167,7 @@ function drawEvoChart(hoverIdx = -1, progress = 1) {
   const maxVal = Math.max(...weights);
   rows.forEach((r, i) => {
     const hovered = i === hoverIdx && progress >= 1;
-    evoPoints.push({ x: px(i), y: py(r.weight), date: r.date, weight: r.weight });
+    evoPoints.push({ x: px(i), y: py(r.weight), date: r.date, weight: r.weight, reps: r.reps || 0 });
     const reveal = Math.min(1, Math.max(0, (edgeX - px(i)) / 20));
     if (reveal <= 0) return;
     const baseR = hovered ? 6 : r.weight === maxVal ? 4.5 : 3.5;
@@ -2109,7 +2229,8 @@ evocCanvas.addEventListener('pointermove', e => {
       }
     }
     const record = p.weight === Math.max(...evoPoints.map(q => q.weight)) ? ' 🏆' : '';
-    evocTooltip.innerHTML = `<strong>${fmtW(p.weight)} kg</strong>${deltaHtml}${record}<span class="tt-date">${formatShortDate(p.date)}</span>`;
+    const repsTxt = p.reps ? ` × ${p.reps}` : '';
+    evocTooltip.innerHTML = `<strong>${fmtW(p.weight)} kg${repsTxt}</strong>${deltaHtml}${record}<span class="tt-date">${formatShortDate(p.date)}</span>`;
     evocTooltip.style.display = 'block';
     const ttw = evocTooltip.offsetWidth;
     evocTooltip.style.left = Math.min(e.clientX + 14, window.innerWidth - ttw - 10) + 'px';

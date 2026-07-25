@@ -390,6 +390,53 @@ app.get('/api/progressao/exercises', (req, res) => {
   res.json(rows.map(r => r.exercise));
 });
 
+// Resumo da última sessão de cada exercício (para os cards do plano)
+app.get('/api/progressao/summary', (req, res) => {
+  const uid = req.session.userId;
+  const rows = db.prepare(`
+    SELECT pc.exercise, pc.date, MAX(pc.weight) AS top,
+           SUM(CASE WHEN pc.set_number >= 1 THEN 1 ELSE 0 END) AS sets
+    FROM progressao_carga pc
+    JOIN (
+      SELECT exercise, MAX(date) AS md FROM progressao_carga WHERE user_id = ? GROUP BY exercise
+    ) last ON last.exercise = pc.exercise AND last.md = pc.date
+    WHERE pc.user_id = ?
+    GROUP BY pc.exercise
+  `).all(uid, uid);
+  res.json(rows);
+});
+
+// Salva a sessão do dia de um exercício (uma linha por série)
+app.post('/api/progressao/session', (req, res) => {
+  const exercise = String(req.body.exercise || '').trim();
+  const date = req.body.date || new Date().toLocaleDateString('en-CA');
+  const sets = Array.isArray(req.body.sets) ? req.body.sets : [];
+  if (!exercise) return res.status(400).json({ error: 'Exercício é obrigatório' });
+
+  const clean = sets
+    .map(s => ({ weight: parseFloat(s.weight), reps: parseInt(s.reps) || 0 }))
+    .filter(s => !isNaN(s.weight) && s.weight > 0);
+  if (clean.length === 0) return res.status(400).json({ error: 'Informe o peso de pelo menos uma série' });
+
+  const uid = req.session.userId;
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM progressao_carga WHERE user_id = ? AND exercise = ? AND date = ?')
+      .run(uid, exercise, date);
+    const ins = db.prepare(
+      'INSERT INTO progressao_carga (user_id, date, exercise, weight, sets, reps, set_number) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    );
+    clean.forEach((s, i) => ins.run(uid, date, exercise, s.weight, clean.length, s.reps, i + 1));
+    // Carga atual do card = top set da sessão
+    const top = Math.max(...clean.map(s => s.weight));
+    db.prepare(`
+      UPDATE plan_items SET current_weight = ?
+      WHERE user_id = ? AND exercise_id IN (SELECT id FROM exercise_library WHERE name = ?)
+    `).run(top, uid, exercise);
+  });
+  tx();
+  res.status(201).json({ saved: clean.length, date });
+});
+
 app.post('/api/progressao', (req, res) => {
   const { date, exercise, weight, sets, reps } = req.body;
   const result = db.prepare(

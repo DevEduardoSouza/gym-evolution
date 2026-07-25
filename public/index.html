@@ -474,12 +474,24 @@
           <span class="evoc-stat-label">Evolução</span>
         </div>
       </div>
+      <div class="evoc-filter" id="evoc-filter"></div>
       <div class="evoc-chart-wrap">
         <canvas id="evoc-chart" height="240"></canvas>
-        <p id="evoc-empty" class="empty-msg" style="display:none">Sem histórico ainda. Ajuste a carga no exercício que a primeira entrada é registrada automaticamente.</p>
+        <p id="evoc-empty" class="empty-msg" style="display:none">Sem histórico ainda. Registre o treino de hoje abaixo para começar o gráfico.</p>
+      </div>
+      <div class="evoc-session">
+        <div class="evoc-session-head">
+          <h3>Registrar hoje</h3>
+          <span class="table-sub" id="evoc-session-date"></span>
+        </div>
+        <div id="evoc-sets"></div>
+        <div class="evoc-session-actions">
+          <button type="button" id="btn-set-add" class="btn-secondary btn-sm"><span data-icon="plus"></span> Série</button>
+          <button type="button" id="btn-session-save" class="btn-primary btn-sm">Salvar treino</button>
+        </div>
       </div>
       <div class="form-actions">
-        <button type="button" class="btn-primary" id="btn-evoc-close">Fechar</button>
+        <button type="button" class="btn-secondary" id="btn-evoc-close">Fechar</button>
       </div>
     </div>
   </div>

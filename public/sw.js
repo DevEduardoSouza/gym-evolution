@@ -1,7 +1,7 @@
 // Service worker do Gym Evolution
-// Estáticos: stale-while-revalidate. Imagens de exercícios: cache-first.
-// APIs: sempre rede (dados nunca ficam velhos).
-const CACHE = 'gym-static-v1';
+// Estáticos: network-first (atualizações chegam na hora; cache é fallback offline).
+// Imagens de exercícios: cache-first. APIs: sempre rede.
+const CACHE = 'gym-static-v2';
 const IMG_CACHE = 'gym-img-v1';
 
 const PRECACHE = [
@@ -57,17 +57,16 @@ self.addEventListener('fetch', e => {
 
   if (url.origin !== location.origin) return;
 
-  // Demais estáticos: responde do cache e atualiza em segundo plano
+  // Demais estáticos: rede primeiro, cache como fallback offline
   e.respondWith(
-    caches.open(CACHE).then(async c => {
-      const hit = await c.match(req);
-      const fresh = fetch(req)
-        .then(res => {
-          if (res.ok) c.put(req, res.clone());
-          return res;
-        })
-        .catch(() => hit);
-      return hit || fresh;
-    })
+    fetch(req)
+      .then(res => {
+        if (res.ok) {
+          const clone = res.clone();
+          caches.open(CACHE).then(c => c.put(req, clone));
+        }
+        return res;
+      })
+      .catch(() => caches.match(req))
   );
 });

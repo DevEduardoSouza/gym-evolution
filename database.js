@@ -130,9 +130,15 @@ db.exec(`
     exercise TEXT NOT NULL,
     weight REAL NOT NULL DEFAULT 0,
     sets INTEGER NOT NULL DEFAULT 0,
-    reps INTEGER NOT NULL DEFAULT 0
+    reps INTEGER NOT NULL DEFAULT 0,
+    set_number INTEGER NOT NULL DEFAULT 0
   )
 `);
+
+// Migração: registro por série (0 = registro antigo de carga única/top set)
+if (!tableColumns('progressao_carga').includes('set_number')) {
+  db.exec('ALTER TABLE progressao_carga ADD COLUMN set_number INTEGER NOT NULL DEFAULT 0');
+}
 
 // ======== CICLO DE TREINO SEMANAL ========
 
