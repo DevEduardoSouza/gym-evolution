@@ -540,9 +540,9 @@ function weekdayOf(dateStr) {
   return (new Date(dateStr + 'T12:00:00').getDay() + 6) % 7;
 }
 
-app.get('/api/gamification', (req, res) => {
-  const logs = db.prepare('SELECT date, plan_item_id FROM workout_log WHERE user_id = ?').all(req.session.userId);
-  const plan = db.prepare('SELECT id, weekday FROM plan_items WHERE user_id = ?').all(req.session.userId);
+function computeGami(userId) {
+  const logs = db.prepare('SELECT date, plan_item_id FROM workout_log WHERE user_id = ?').all(userId);
+  const plan = db.prepare('SELECT id, weekday FROM plan_items WHERE user_id = ?').all(userId);
   const planByWeekday = {};
   plan.forEach(p => { planByWeekday[p.weekday] = (planByWeekday[p.weekday] || 0) + 1; });
 
@@ -574,7 +574,7 @@ app.get('/api/gamification', (req, res) => {
     need = 100 + (level - 1) * 50;
   }
 
-  res.json({
+  return {
     xp,
     level,
     xpIntoLevel: remaining,
@@ -582,7 +582,74 @@ app.get('/api/gamification', (req, res) => {
     totalExercises,
     completeDays,
     completeDates,
-  });
+  };
+}
+
+app.get('/api/gamification', (req, res) => {
+  res.json(computeGami(req.session.userId));
+});
+
+// ======== RANKING SEMANAL ========
+
+app.get('/api/ranking', (req, res) => {
+  const now = new Date();
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const start = monday.toLocaleDateString('en-CA');
+  const end = sunday.toLocaleDateString('en-CA');
+
+  const users = db.prepare('SELECT id, username FROM users').all();
+  const rows = users.map(u => {
+    const g = computeGami(u.id);
+    const weekLogs = db.prepare(
+      'SELECT COUNT(*) n FROM workout_log WHERE user_id = ? AND date >= ? AND date <= ?'
+    ).get(u.id, start, end).n;
+    const weekBonus = g.completeDates.filter(d => d >= start && d <= end).length * XP_DAY_BONUS;
+    const profile = db.prepare('SELECT avatar FROM profile WHERE user_id = ?').get(u.id);
+    return {
+      username: u.username,
+      level: g.level,
+      xp: g.xp,
+      weekXp: weekLogs * XP_PER_EXERCISE + weekBonus,
+      avatar: (profile && profile.avatar) || '',
+      isMe: u.id === req.session.userId,
+    };
+  }).sort((a, b) => b.weekXp - a.weekXp || b.xp - a.xp);
+
+  res.json(rows);
+});
+
+// ======== FOTOS DE PROGRESSO ========
+
+app.get('/api/photos', (req, res) => {
+  const rows = db.prepare(
+    'SELECT id, date, label, image FROM progress_photos WHERE user_id = ? ORDER BY date ASC, id ASC'
+  ).all(req.session.userId);
+  res.json(rows);
+});
+
+app.post('/api/photos', (req, res) => {
+  const { date, label, image } = req.body;
+  if (!image || !String(image).startsWith('data:image/')) {
+    return res.status(400).json({ error: 'Imagem inválida' });
+  }
+  if (String(image).length > 1.6 * 1024 * 1024) {
+    return res.status(400).json({ error: 'Imagem muito grande' });
+  }
+  const d = date || new Date().toLocaleDateString('en-CA');
+  const result = db.prepare(
+    'INSERT INTO progress_photos (user_id, date, label, image) VALUES (?, ?, ?, ?)'
+  ).run(req.session.userId, d, String(label || ''), image);
+  res.status(201).json(db.prepare('SELECT id, date, label, image FROM progress_photos WHERE id = ?').get(result.lastInsertRowid));
+});
+
+app.delete('/api/photos/:id', (req, res) => {
+  const result = db.prepare('DELETE FROM progress_photos WHERE id = ? AND user_id = ?')
+    .run(req.params.id, req.session.userId);
+  if (result.changes === 0) return res.status(404).json({ error: 'Foto não encontrada' });
+  res.json({ success: true });
 });
 
 app.listen(PORT, () => {

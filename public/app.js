@@ -1035,6 +1035,7 @@ async function migrateProfile() {
 
 // ======== TAB SWITCHING ========
 const TAB_TITLES = {
+  hoje: 'Hoje',
   medicoes: 'Medições',
   agua: 'Água',
   treino: 'Treino',
@@ -1073,6 +1074,8 @@ document.querySelectorAll('.nav-btn[data-tab]').forEach(btn => {
       void p.offsetWidth;
       p.classList.add('panel-enter');
     });
+    if (tab === 'hoje') loadHojeData();
+    if (tab === 'medicoes') loadPhotos();
     if (tab === 'agua') loadWaterData();
     if (tab === 'treino') loadTreinoData();
     if (tab === 'ciclo') loadCicloData();
@@ -1383,6 +1386,8 @@ const ICONS = {
   trending: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>',
   award: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="6"/><path d="M15.477 12.89 17 22l-5-3-5 3 1.523-9.11"/></svg>',
   calendar: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+  home: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h5v-6h4v6h5V9.5"/></svg>',
+  bell: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>',
 };
 const ICON_DUMBBELL = ICONS.dumbbell;
 const ICON_RUN = ICONS.run;
@@ -2268,9 +2273,319 @@ function injectIcons(root) {
   });
 }
 
+// ======== TELA INICIAL (HOJE) ========
+let hojeHasTreino = false;
+let hojeMuscles = '';
+
+async function loadHojeData() {
+  const today = todayStr();
+  const [plan, logs, gami, tstats, wcfg, wint, ranking] = await Promise.all([
+    api('GET', '/api/plan'),
+    api('GET', `/api/workout-log?start=${today}&end=${today}`),
+    api('GET', '/api/gamification'),
+    api('GET', '/api/treino/stats'),
+    api('GET', '/api/water-config'),
+    api('GET', `/api/water-intake?year=${today.slice(0, 4)}`),
+    api('GET', '/api/ranking'),
+  ]);
+  renderHoje(plan, logs, gami, tstats, wcfg, wint, ranking);
+}
+
+function renderHoje(plan, logs, gami, tstats, wcfg, wint, ranking) {
+  const now = new Date();
+  const today = todayStr();
+  const wd = (now.getDay() + 6) % 7;
+
+  // Saudação
+  const h = now.getHours();
+  const sauda = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
+  const nome = document.getElementById('sidebar-username').textContent || '';
+  document.getElementById('hoje-greeting').textContent =
+    `${sauda}${nome ? ', ' + nome : ''}! ${WEEKDAY_NAMES[wd]}, ${formatDate(today)}`;
+
+  // Treino de hoje
+  const items = plan.filter(p => p.weekday === wd);
+  const doneSet = new Set(logs.map(l => l.plan_item_id));
+  hojeHasTreino = items.length > 0;
+  hojeMuscles = [...new Set(items.map(p => p.muscle))].join(' + ');
+
+  const doneCount = items.filter(p => doneSet.has(p.id)).length;
+  document.getElementById('hoje-treino-sub').textContent = items.length
+    ? `${hojeMuscles} · ${doneCount}/${items.length} concluídos`
+    : '';
+
+  const listEl = document.getElementById('hoje-exercicios');
+  document.getElementById('hoje-treino-empty').style.display = items.length ? 'none' : '';
+  listEl.innerHTML = '';
+  items.forEach(p => {
+    const done = doneSet.has(p.id);
+    const row = document.createElement('div');
+    row.className = 'hj-ex' + (done ? ' done' : '');
+    row.innerHTML = `
+      <button class="hj-check" title="${done ? 'Desmarcar' : 'Concluir'}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+      </button>
+      <span class="hj-name">${esc(p.name)}</span>
+      <span class="hj-scheme">${esc(p.scheme)}</span>
+      <span class="hj-carga">${p.current_weight != null ? String(p.current_weight).replace('.', ',') + ' kg' : ''}</span>
+    `;
+    row.querySelector('.hj-check').addEventListener('click', async () => {
+      const result = await api('POST', '/api/workout-log/toggle', { date: today, plan_item_id: p.id });
+      if (result.done) {
+        const allDone = items.every(x => x.id === p.id || doneSet.has(x.id));
+        if (allDone) {
+          confetti();
+          toastMsg('Treino de hoje completo! 🏆');
+        } else {
+          toastMsg('+10 XP!');
+        }
+      }
+      loadHojeData();
+    });
+    listEl.appendChild(row);
+  });
+  animateIn(listEl.children, 0.035);
+
+  // Água de hoje
+  const todayRec = wint.find(r => r.date === today);
+  const bottles = todayRec ? todayRec.bottles : 0;
+  const ml = bottles * wcfg.bottle_size_ml;
+  const pct = wcfg.daily_goal_ml > 0 ? Math.min(100, (ml / wcfg.daily_goal_ml) * 100) : 0;
+  document.getElementById('hoje-agua-atual').textContent = (ml / 1000).toFixed(1).replace('.', ',');
+  document.getElementById('hoje-agua-meta').textContent = (wcfg.daily_goal_ml / 1000).toFixed(1).replace('.', ',');
+  document.getElementById('hoje-agua-fill').style.width = pct + '%';
+  const garrafaBtn = document.getElementById('btn-hoje-garrafa');
+  garrafaBtn.dataset.bottles = bottles;
+
+  // Mini stats
+  countUp(document.getElementById('hoje-streak'), tstats.currentStreak || 0);
+  countUp(document.getElementById('hoje-nivel'), gami.level || 1);
+  countUp(document.getElementById('hoje-xp'), gami.xp || 0);
+
+  renderRanking(ranking);
+}
+
+document.getElementById('btn-hoje-garrafa').addEventListener('click', async e => {
+  const bottles = (parseFloat(e.currentTarget.dataset.bottles) || 0) + 1;
+  await api('POST', '/api/water-intake', { date: todayStr(), bottles });
+  toastMsg('+1 garrafa! 💧');
+  loadHojeData();
+});
+
+document.getElementById('btn-hoje-semana').addEventListener('click', () => {
+  document.querySelector('.nav-btn[data-tab="ciclo"]').click();
+});
+
+// ---- Ranking ----
+function renderRanking(list) {
+  const el = document.getElementById('ranking-list');
+  el.innerHTML = '';
+  const medals = ['🥇', '🥈', '🥉'];
+  list.forEach((u, i) => {
+    const row = document.createElement('div');
+    row.className = 'rank-row' + (u.isMe ? ' me' : '');
+    const pic = u.avatar
+      ? `<span class="rank-pic" style="background-image:url(${u.avatar})"></span>`
+      : `<span class="rank-pic rank-pic-fallback">${esc((u.username[0] || '?').toUpperCase())}</span>`;
+    row.innerHTML = `
+      <span class="rank-pos">${medals[i] || (i + 1) + 'º'}</span>
+      ${pic}
+      <span class="rank-name">${esc(u.username)}${u.isMe ? ' <small>(você)</small>' : ''}</span>
+      <span class="rank-level">Nível ${u.level}</span>
+      <span class="rank-xp">+${u.weekXp} XP</span>
+    `;
+    el.appendChild(row);
+  });
+  animateIn(el.children, 0.05);
+}
+
+// ======== LEMBRETES ========
+const REM_KEY = 'gym_reminders';
+
+function remGet() {
+  try { return JSON.parse(localStorage.getItem(REM_KEY)) || {}; } catch { return {}; }
+}
+function remSave(r) {
+  localStorage.setItem(REM_KEY, JSON.stringify(r));
+}
+
+async function ensureNotifPermission() {
+  if (!('Notification' in window)) {
+    toastMsg('Seu navegador não suporta notificações');
+    return false;
+  }
+  if (Notification.permission === 'granted') return true;
+  const p = await Notification.requestPermission();
+  if (p !== 'granted') toastMsg('Permissão de notificação negada');
+  return p === 'granted';
+}
+
+function notify(title, body) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  try { new Notification(title, { body, icon: '/favicon.svg' }); } catch {}
+}
+
+(function initReminders() {
+  const aguaOn = document.getElementById('rem-agua-on');
+  const aguaHoras = document.getElementById('rem-agua-horas');
+  const treinoOn = document.getElementById('rem-treino-on');
+  const treinoHora = document.getElementById('rem-treino-hora');
+  if (!aguaOn) return;
+
+  const r = remGet();
+  aguaOn.checked = !!r.aguaOn;
+  if (r.aguaHoras) aguaHoras.value = r.aguaHoras;
+  treinoOn.checked = !!r.treinoOn;
+  if (r.treinoHora) treinoHora.value = r.treinoHora;
+
+  const save = async (askPermission) => {
+    if (askPermission && !(await ensureNotifPermission())) {
+      aguaOn.checked = false;
+      treinoOn.checked = false;
+    }
+    const cur = remGet();
+    remSave({
+      ...cur,
+      aguaOn: aguaOn.checked,
+      aguaHoras: aguaHoras.value,
+      treinoOn: treinoOn.checked,
+      treinoHora: treinoHora.value,
+    });
+  };
+
+  aguaOn.addEventListener('change', () => save(aguaOn.checked));
+  treinoOn.addEventListener('change', () => save(treinoOn.checked));
+  aguaHoras.addEventListener('change', () => save(false));
+  treinoHora.addEventListener('change', () => save(false));
+
+  function checkReminders() {
+    const rem = remGet();
+    const now = new Date();
+
+    // Água: entre 8h e 22h, a cada N horas
+    if (rem.aguaOn && now.getHours() >= 8 && now.getHours() < 22) {
+      const interval = (parseInt(rem.aguaHoras, 10) || 2) * 3600 * 1000;
+      if (!rem.lastAgua || Date.now() - rem.lastAgua >= interval) {
+        notify('💧 Hora da água', 'Registra a garrafa e mantém a sequência!');
+        rem.lastAgua = Date.now();
+        remSave(rem);
+      }
+    }
+
+    // Treino: no horário marcado, uma vez por dia (só quando há treino no plano)
+    if (rem.treinoOn && hojeHasTreino && rem.treinoHora) {
+      const hhmm = now.toTimeString().slice(0, 5);
+      if (hhmm === rem.treinoHora && rem.lastTreinoDay !== todayStr()) {
+        notify('💪 Hora do treino', hojeMuscles ? `Hoje é dia de ${hojeMuscles}!` : 'Bora treinar!');
+        rem.lastTreinoDay = todayStr();
+        remSave(rem);
+      }
+    }
+  }
+
+  setInterval(checkReminders, 60 * 1000);
+})();
+
+// ======== FOTOS DE PROGRESSO ========
+let photosList = [];
+let photoSel = [];
+
+async function loadPhotos() {
+  photosList = await api('GET', '/api/photos');
+  renderPhotos();
+}
+
+function renderPhotos() {
+  const grid = document.getElementById('photos-grid');
+  const empty = document.getElementById('photos-empty');
+  const hint = document.getElementById('photos-hint');
+  const sub = document.getElementById('photos-sub');
+  empty.style.display = photosList.length ? 'none' : '';
+  hint.style.display = photosList.length >= 2 ? '' : 'none';
+  sub.textContent = photosList.length
+    ? `${photosList.length} ${photosList.length === 1 ? 'foto' : 'fotos'}`
+    : 'Registre seu shape e compare a evolução';
+
+  grid.innerHTML = '';
+  photosList.forEach(p => {
+    const item = document.createElement('div');
+    item.className = 'photo-item' + (photoSel.includes(p.id) ? ' sel' : '');
+    item.innerHTML = `
+      <img src="${p.image}" alt="Foto de ${formatShortDate(p.date)}" loading="lazy">
+      <span class="photo-date">${formatShortDate(p.date)}</span>
+      <button class="photo-del" title="Excluir foto">&#10005;</button>
+    `;
+    item.addEventListener('click', ev => {
+      if (ev.target.closest('.photo-del')) return;
+      if (photoSel.includes(p.id)) {
+        photoSel = photoSel.filter(x => x !== p.id);
+      } else {
+        photoSel.push(p.id);
+        if (photoSel.length > 2) photoSel.shift();
+      }
+      renderPhotos();
+      if (photoSel.length === 2) openCompare();
+    });
+    item.querySelector('.photo-del').addEventListener('click', async () => {
+      if (!confirm('Excluir esta foto?')) return;
+      await api('DELETE', `/api/photos/${p.id}`);
+      photoSel = photoSel.filter(x => x !== p.id);
+      loadPhotos();
+    });
+    grid.appendChild(item);
+  });
+  animateIn(grid.children, 0.03);
+}
+
+function openCompare() {
+  const pair = photosList
+    .filter(p => photoSel.includes(p.id))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  if (pair.length < 2) return;
+  document.getElementById('cmp-img-a').src = pair[0].image;
+  document.getElementById('cmp-img-b').src = pair[1].image;
+  document.getElementById('cmp-cap-a').textContent = formatShortDate(pair[0].date);
+  document.getElementById('cmp-cap-b').textContent = formatShortDate(pair[1].date);
+  const days = Math.round((new Date(pair[1].date) - new Date(pair[0].date)) / 86400000);
+  document.getElementById('cmp-delta').textContent = days > 0
+    ? `${days} dias de evolução entre as fotos 💪` : '';
+  document.getElementById('modal-compare').classList.remove('hidden');
+}
+
+const modalCompare = document.getElementById('modal-compare');
+document.getElementById('btn-compare-close').addEventListener('click', () => modalCompare.classList.add('hidden'));
+modalCompare.addEventListener('click', e => { if (e.target === modalCompare) modalCompare.classList.add('hidden'); });
+
+document.getElementById('btn-photo-add').addEventListener('click', () => {
+  document.getElementById('photo-input').click();
+});
+
+document.getElementById('photo-input').addEventListener('change', e => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  const img = new Image();
+  img.onload = async () => {
+    // Reduz para no máximo 900px no lado maior
+    const MAX = 900;
+    const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(img.width * scale);
+    canvas.height = Math.round(img.height * scale);
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+    URL.revokeObjectURL(img.src);
+    await api('POST', '/api/photos', { date: todayStr(), image: dataUrl });
+    toastMsg('Foto registrada! 📸');
+    loadPhotos();
+  };
+  img.src = URL.createObjectURL(file);
+  e.target.value = '';
+});
+
 // Init
 injectIcons();
-updateHeaderActions('medicoes');
+updateHeaderActions('hoje');
 loadData();
+loadHojeData();
 migrateProfile();
 loadProfile().then(() => { renderBodyGoal(); updateSidebarAvatar(); }).catch(() => {});

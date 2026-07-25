@@ -15,7 +15,10 @@
         <span class="brand-text">Gym Evolution</span>
       </div>
       <nav class="side-nav">
-        <button class="nav-btn active" data-tab="medicoes">
+        <button class="nav-btn active" data-tab="hoje">
+          <span class="nav-icon" data-icon="home"></span><span class="nav-label">Hoje</span>
+        </button>
+        <button class="nav-btn" data-tab="medicoes">
           <span class="nav-icon" data-icon="ruler"></span><span class="nav-label">Medições</span>
         </button>
         <button class="nav-btn" data-tab="agua">
@@ -51,7 +54,7 @@
       <div class="container">
         <header>
           <div>
-            <h1 id="page-title">Medições</h1>
+            <h1 id="page-title">Hoje</h1>
             <p id="period" class="period"></p>
           </div>
           <div class="header-buttons">
@@ -60,7 +63,66 @@
           </div>
         </header>
 
-    <div id="tab-medicoes" class="tab-panel active">
+    <div id="tab-hoje" class="tab-panel active">
+      <p class="hoje-greeting" id="hoje-greeting"></p>
+      <div class="hoje-grid">
+        <div class="hoje-card hoje-treino-card">
+          <div class="hoje-card-head">
+            <div>
+              <h3 id="hoje-treino-title">Treino de hoje</h3>
+              <p class="day-sub" id="hoje-treino-sub"></p>
+            </div>
+            <button id="btn-hoje-semana" class="btn-secondary btn-sm">Ver semana</button>
+          </div>
+          <div id="hoje-exercicios" class="hoje-exercicios"></div>
+          <p id="hoje-treino-empty" class="empty-msg" style="display:none">Dia livre hoje. Descansa que amanhã tem! 🛌</p>
+        </div>
+        <div class="hoje-side">
+          <div class="hoje-card hoje-agua-card">
+            <div class="hoje-card-head">
+              <h3><span data-icon="drop"></span> Água</h3>
+              <button id="btn-hoje-garrafa" class="btn-primary btn-sm"><span data-icon="plus"></span> Garrafa</button>
+            </div>
+            <div class="hoje-agua-nums"><span id="hoje-agua-atual">0,0</span><span class="hoje-agua-meta"> / <span id="hoje-agua-meta">3,0</span> L</span></div>
+            <div class="gami-xp-bar"><div class="gami-xp-fill" id="hoje-agua-fill" style="width:0%"></div></div>
+          </div>
+          <div class="hoje-card hoje-stats-card">
+            <div class="hoje-mini-stats">
+              <div class="hoje-mini"><span class="hoje-mini-value" id="hoje-streak">0</span><span class="hoje-mini-label"><span data-icon="flame"></span> Sequência</span></div>
+              <div class="hoje-mini"><span class="hoje-mini-value" id="hoje-nivel">1</span><span class="hoje-mini-label">Nível</span></div>
+              <div class="hoje-mini"><span class="hoje-mini-value" id="hoje-xp">0</span><span class="hoje-mini-label">XP</span></div>
+            </div>
+          </div>
+          <div class="hoje-card hoje-lembretes-card">
+            <h3><span data-icon="bell"></span> Lembretes</h3>
+            <label class="rem-row">
+              <input type="checkbox" id="rem-agua-on">
+              <span>Beber água a cada</span>
+              <select id="rem-agua-horas">
+                <option value="1">1h</option>
+                <option value="2" selected>2h</option>
+                <option value="3">3h</option>
+              </select>
+            </label>
+            <label class="rem-row">
+              <input type="checkbox" id="rem-treino-on">
+              <span>Treino às</span>
+              <input type="time" id="rem-treino-hora" value="18:00">
+            </label>
+            <p class="profile-hint" id="rem-hint">Os avisos aparecem com o app aberto no navegador.</p>
+          </div>
+        </div>
+      </div>
+      <div class="hoje-card hoje-ranking-card">
+        <div class="hoje-card-head">
+          <h3><span data-icon="award"></span> Ranking da semana</h3>
+          <span class="table-hint">XP conquistado de segunda a domingo</span>
+        </div>
+        <div id="ranking-list" class="ranking-list"></div>
+      </div>
+    </div>
+
+    <div id="tab-medicoes" class="tab-panel">
       <div class="med-hero" id="med-hero">
         <div class="med-hero-left">
           <div class="med-hero-head">
@@ -108,6 +170,22 @@
           </table>
         </div>
         <p id="empty-msg" class="empty-msg">Nenhuma medição registrada. Clique em "+ Nova Medição" para começar.</p>
+      </div>
+
+      <div class="table-wrapper photos-card">
+        <div class="table-bar">
+          <div>
+            <h3>Fotos de Progresso</h3>
+            <p class="table-sub" id="photos-sub">Registre seu shape e compare a evolução</p>
+          </div>
+          <button id="btn-photo-add" class="btn-primary btn-sm"><span data-icon="plus"></span> Foto</button>
+        </div>
+        <div class="photos-body">
+          <div id="photos-grid" class="photos-grid"></div>
+          <p id="photos-empty" class="empty-msg">Nenhuma foto ainda. Tire uma foto de frente hoje — daqui a 3 meses você vai agradecer.</p>
+          <p class="profile-hint" id="photos-hint" style="display:none">Toque em duas fotos para comparar lado a lado</p>
+        </div>
+        <input type="file" id="photo-input" accept="image/*" hidden>
       </div>
     </div>
 
@@ -336,6 +414,27 @@
       <div class="form-actions library-footer">
         <button type="button" id="btn-custom-exercise" class="btn-secondary"><span data-icon="plus"></span> Criar exercício</button>
         <button type="button" id="btn-library-close" class="btn-primary">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de comparação de fotos -->
+  <div id="modal-compare" class="modal-overlay hidden">
+    <div class="modal modal-compare">
+      <h2>Antes × Depois</h2>
+      <div class="compare-grid">
+        <figure>
+          <img id="cmp-img-a" alt="Foto anterior">
+          <figcaption id="cmp-cap-a"></figcaption>
+        </figure>
+        <figure>
+          <img id="cmp-img-b" alt="Foto recente">
+          <figcaption id="cmp-cap-b"></figcaption>
+        </figure>
+      </div>
+      <p class="profile-hint" id="cmp-delta"></p>
+      <div class="form-actions">
+        <button type="button" class="btn-primary" id="btn-compare-close">Fechar</button>
       </div>
     </div>
   </div>

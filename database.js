@@ -77,6 +77,17 @@ if (!tableColumns('profile').includes('avatar')) {
   db.exec("ALTER TABLE profile ADD COLUMN avatar TEXT DEFAULT ''");
 }
 
+// Fotos de progresso (shape check)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS progress_photos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    date TEXT NOT NULL,
+    label TEXT DEFAULT '',
+    image TEXT NOT NULL
+  )
+`);
+
 const CREATE_WATER_CONFIG = `
   CREATE TABLE IF NOT EXISTS water_config (
     user_id INTEGER PRIMARY KEY,
