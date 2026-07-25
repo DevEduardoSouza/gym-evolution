@@ -4033,3 +4033,7 @@ button, a, input, select, textarea, label, canvas,
     font-size: 16px !important;
   }
 }
+
+/* Esquema como texto no card (input removido) */
+.ex-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ex-scheme-txt { font-size: 0.72rem; color: var(--faint); font-variant-numeric: tabular-nums; }

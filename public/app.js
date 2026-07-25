@@ -1781,13 +1781,12 @@ function renderDay() {
       <div class="ex-thumb" title="Ver evolução de carga">${thumb}</div>
       <div class="ex-info" title="Ver evolução de carga">
         <span class="ex-name">${esc(p.name)}</span>
-        <span class="ex-chip ${muscleClass(p.muscle)}">${esc(p.muscle)}</span>
+        <span class="ex-meta">
+          <span class="ex-chip ${muscleClass(p.muscle)}">${esc(p.muscle)}</span>
+          ${p.scheme ? `<span class="ex-scheme-txt">${esc(p.scheme)}</span>` : ''}
+        </span>
       </div>
       <div class="ex-fields">
-        <label class="ex-field">
-          <span>Séries × Reps</span>
-          <input class="ex-scheme" type="text" value="${esc(p.scheme)}" placeholder="3 × 10-12">
-        </label>
         <button class="ex-field ex-last" type="button" title="Ver evolução e registrar séries">
           <span>Último treino</span>
           <span class="ex-last-val">${lastTxt}</span>
@@ -1804,11 +1803,6 @@ function renderDay() {
       await api('DELETE', `/api/plan/${p.id}`);
       await loadCicloData();
     });
-    card.querySelector('.ex-scheme').addEventListener('change', async e => {
-      await api('PUT', `/api/plan/${p.id}`, { scheme: e.target.value });
-      p.scheme = e.target.value;
-    });
-
     card.querySelector('.ex-last').addEventListener('click', () => openEvoModal(p));
 
     listEl.appendChild(card);
