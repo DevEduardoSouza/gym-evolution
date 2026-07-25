@@ -9,7 +9,7 @@ const PORT = process.env.PORT || 3010;
 
 const SESSION_SECRET = process.env.SESSION_SECRET || 'gym-evolution-secret-change-me';
 
-app.use(express.json());
+app.use(express.json({ limit: '2mb' })); // avatar em base64 no perfil
 app.use(express.urlencoded({ extended: false }));
 
 app.use(session({
@@ -100,7 +100,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Usuário logado
 app.get('/api/me', (req, res) => {
-  res.json({ username: req.session.username });
+  const user = db.prepare('SELECT username, created_at FROM users WHERE id = ?').get(req.session.userId);
+  res.json({ username: req.session.username, created_at: user ? user.created_at : null });
 });
 
 // Listar todas as medições ordenadas por data
@@ -162,12 +163,18 @@ app.get('/api/profile', (req, res) => {
 });
 
 app.put('/api/profile', (req, res) => {
-  const { sexo, idade, altura, freq, calorias, rotina, peso_meta } = req.body;
   db.prepare('INSERT OR IGNORE INTO profile (user_id) VALUES (?)').run(req.session.userId);
+  // Atualização parcial: só sobrescreve os campos presentes no body
+  const existing = db.prepare('SELECT * FROM profile WHERE user_id = ?').get(req.session.userId) || {};
+  const pick = (key, fallback) => (req.body[key] !== undefined ? req.body[key] : existing[key]) || fallback;
   db.prepare(`
-    UPDATE profile SET sexo = ?, idade = ?, altura = ?, freq = ?, calorias = ?, rotina = ?, peso_meta = ?
+    UPDATE profile SET sexo = ?, idade = ?, altura = ?, freq = ?, calorias = ?, rotina = ?, peso_meta = ?, avatar = ?
     WHERE user_id = ?
-  `).run(sexo || '', idade || null, altura || null, freq || null, calorias || null, rotina || '', peso_meta || null, req.session.userId);
+  `).run(
+    pick('sexo', ''), pick('idade', null), pick('altura', null), pick('freq', null),
+    pick('calorias', null), pick('rotina', ''), pick('peso_meta', null), pick('avatar', ''),
+    req.session.userId
+  );
   const updated = db.prepare('SELECT * FROM profile WHERE user_id = ?').get(req.session.userId);
   res.json(updated);
 });
@@ -405,6 +412,177 @@ app.delete('/api/progressao/:id', (req, res) => {
   const result = db.prepare('DELETE FROM progressao_carga WHERE id = ? AND user_id = ?').run(id, req.session.userId);
   if (result.changes === 0) return res.status(404).json({ error: 'Registro não encontrado' });
   res.json({ success: true });
+});
+
+// ======== CICLO DE TREINO SEMANAL ========
+
+// Biblioteca de exercícios (globais + do usuário)
+app.get('/api/library', (req, res) => {
+  const rows = db.prepare(`
+    SELECT * FROM exercise_library
+    WHERE user_id IS NULL OR user_id = ?
+    ORDER BY muscle ASC, name ASC
+  `).all(req.session.userId);
+  res.json(rows);
+});
+
+app.post('/api/library', (req, res) => {
+  const name = String(req.body.name || '').trim();
+  const muscle = String(req.body.muscle || '').trim() || 'Outro';
+  if (!name) return res.status(400).json({ error: 'Nome do exercício é obrigatório' });
+  const result = db.prepare('INSERT INTO exercise_library (user_id, name, muscle, image1, image2) VALUES (?, ?, ?, ?, ?)')
+    .run(req.session.userId, name, muscle, String(req.body.image1 || ''), String(req.body.image2 || ''));
+  res.status(201).json(db.prepare('SELECT * FROM exercise_library WHERE id = ?').get(result.lastInsertRowid));
+});
+
+app.delete('/api/library/:id', (req, res) => {
+  const result = db.prepare('DELETE FROM exercise_library WHERE id = ? AND user_id = ?')
+    .run(req.params.id, req.session.userId);
+  if (result.changes === 0) return res.status(404).json({ error: 'Só é possível remover exercícios criados por você' });
+  res.json({ success: true });
+});
+
+// Plano semanal
+app.get('/api/plan', (req, res) => {
+  const rows = db.prepare(`
+    SELECT p.*, e.name, e.muscle, e.image1, e.image2
+    FROM plan_items p
+    JOIN exercise_library e ON e.id = p.exercise_id
+    WHERE p.user_id = ?
+    ORDER BY p.weekday ASC, p.position ASC, p.id ASC
+  `).all(req.session.userId);
+  res.json(rows);
+});
+
+app.post('/api/plan', (req, res) => {
+  const { weekday, exercise_id, scheme } = req.body;
+  const wd = parseInt(weekday);
+  if (isNaN(wd) || wd < 0 || wd > 6) return res.status(400).json({ error: 'Dia da semana inválido' });
+  const ex = db.prepare('SELECT * FROM exercise_library WHERE id = ? AND (user_id IS NULL OR user_id = ?)')
+    .get(exercise_id, req.session.userId);
+  if (!ex) return res.status(404).json({ error: 'Exercício não encontrado' });
+  const maxPos = db.prepare('SELECT COALESCE(MAX(position), -1) AS p FROM plan_items WHERE user_id = ? AND weekday = ?')
+    .get(req.session.userId, wd).p;
+  const result = db.prepare('INSERT INTO plan_items (user_id, weekday, exercise_id, scheme, position) VALUES (?, ?, ?, ?, ?)')
+    .run(req.session.userId, wd, exercise_id, String(scheme || '3 × 10-12'), maxPos + 1);
+  const row = db.prepare(`
+    SELECT p.*, e.name, e.muscle, e.image1, e.image2 FROM plan_items p
+    JOIN exercise_library e ON e.id = p.exercise_id WHERE p.id = ?
+  `).get(result.lastInsertRowid);
+  res.status(201).json(row);
+});
+
+app.put('/api/plan/:id', (req, res) => {
+  const item = db.prepare('SELECT p.*, e.name FROM plan_items p JOIN exercise_library e ON e.id = p.exercise_id WHERE p.id = ? AND p.user_id = ?')
+    .get(req.params.id, req.session.userId);
+  if (!item) return res.status(404).json({ error: 'Item não encontrado' });
+
+  const scheme = req.body.scheme != null ? String(req.body.scheme) : item.scheme;
+  const weight = req.body.current_weight != null && req.body.current_weight !== ''
+    ? parseFloat(req.body.current_weight) : item.current_weight;
+
+  db.prepare('UPDATE plan_items SET scheme = ?, current_weight = ? WHERE id = ?').run(scheme, weight, req.params.id);
+
+  // Registra histórico de carga quando o peso muda (aproveita a tabela progressao_carga)
+  if (req.body.current_weight != null && req.body.current_weight !== '' && parseFloat(req.body.current_weight) !== item.current_weight) {
+    const today = new Date().toLocaleDateString('en-CA');
+    db.prepare('INSERT INTO progressao_carga (user_id, date, exercise, weight, sets, reps) VALUES (?, ?, ?, ?, 0, 0)')
+      .run(req.session.userId, today, item.name, parseFloat(req.body.current_weight));
+  }
+
+  const row = db.prepare(`
+    SELECT p.*, e.name, e.muscle, e.image1, e.image2 FROM plan_items p
+    JOIN exercise_library e ON e.id = p.exercise_id WHERE p.id = ?
+  `).get(req.params.id);
+  res.json(row);
+});
+
+app.delete('/api/plan/:id', (req, res) => {
+  const result = db.prepare('DELETE FROM plan_items WHERE id = ? AND user_id = ?').run(req.params.id, req.session.userId);
+  if (result.changes === 0) return res.status(404).json({ error: 'Item não encontrado' });
+  db.prepare('DELETE FROM workout_log WHERE plan_item_id = ? AND user_id = ?').run(req.params.id, req.session.userId);
+  res.json({ success: true });
+});
+
+// Log de exercícios concluídos (por data)
+app.get('/api/workout-log', (req, res) => {
+  const { start, end } = req.query;
+  let rows;
+  if (start && end) {
+    rows = db.prepare('SELECT * FROM workout_log WHERE user_id = ? AND date >= ? AND date <= ?')
+      .all(req.session.userId, start, end);
+  } else {
+    rows = db.prepare('SELECT * FROM workout_log WHERE user_id = ?').all(req.session.userId);
+  }
+  res.json(rows);
+});
+
+app.post('/api/workout-log/toggle', (req, res) => {
+  const { date, plan_item_id } = req.body;
+  if (!date || !plan_item_id) return res.status(400).json({ error: 'Data e exercício são obrigatórios' });
+  const existing = db.prepare('SELECT id FROM workout_log WHERE user_id = ? AND date = ? AND plan_item_id = ?')
+    .get(req.session.userId, date, plan_item_id);
+  if (existing) {
+    db.prepare('DELETE FROM workout_log WHERE id = ?').run(existing.id);
+    return res.json({ done: false });
+  }
+  db.prepare('INSERT INTO workout_log (user_id, date, plan_item_id) VALUES (?, ?, ?)')
+    .run(req.session.userId, date, plan_item_id);
+  res.json({ done: true });
+});
+
+// Gamificação: XP, nível e estatísticas
+const XP_PER_EXERCISE = 10;
+const XP_DAY_BONUS = 30;
+
+function weekdayOf(dateStr) {
+  // 0=Seg ... 6=Dom
+  return (new Date(dateStr + 'T12:00:00').getDay() + 6) % 7;
+}
+
+app.get('/api/gamification', (req, res) => {
+  const logs = db.prepare('SELECT date, plan_item_id FROM workout_log WHERE user_id = ?').all(req.session.userId);
+  const plan = db.prepare('SELECT id, weekday FROM plan_items WHERE user_id = ?').all(req.session.userId);
+  const planByWeekday = {};
+  plan.forEach(p => { planByWeekday[p.weekday] = (planByWeekday[p.weekday] || 0) + 1; });
+
+  const byDate = {};
+  logs.forEach(l => {
+    (byDate[l.date] = byDate[l.date] || new Set()).add(l.plan_item_id);
+  });
+
+  let completeDays = 0;
+  const completeDates = [];
+  for (const [date, set] of Object.entries(byDate)) {
+    const planned = planByWeekday[weekdayOf(date)] || 0;
+    if (planned > 0 && set.size >= planned) {
+      completeDays++;
+      completeDates.push(date);
+    }
+  }
+
+  const totalExercises = logs.length;
+  const xp = totalExercises * XP_PER_EXERCISE + completeDays * XP_DAY_BONUS;
+
+  // Curva de nível: cada nível pede um pouco mais de XP
+  let level = 1;
+  let remaining = xp;
+  let need = 100;
+  while (remaining >= need) {
+    remaining -= need;
+    level++;
+    need = 100 + (level - 1) * 50;
+  }
+
+  res.json({
+    xp,
+    level,
+    xpIntoLevel: remaining,
+    xpForNext: need,
+    totalExercises,
+    completeDays,
+    completeDates,
+  });
 });
 
 app.listen(PORT, () => {

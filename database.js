@@ -66,10 +66,16 @@ const CREATE_PROFILE = `
     freq INTEGER,
     calorias INTEGER,
     rotina TEXT DEFAULT '',
-    peso_meta REAL
+    peso_meta REAL,
+    avatar TEXT DEFAULT ''
   )
 `;
 db.exec(CREATE_PROFILE);
+
+// Migração: foto de perfil
+if (!tableColumns('profile').includes('avatar')) {
+  db.exec("ALTER TABLE profile ADD COLUMN avatar TEXT DEFAULT ''");
+}
 
 const CREATE_WATER_CONFIG = `
   CREATE TABLE IF NOT EXISTS water_config (
@@ -116,6 +122,60 @@ db.exec(`
     reps INTEGER NOT NULL DEFAULT 0
   )
 `);
+
+// ======== CICLO DE TREINO SEMANAL ========
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS exercise_library (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    name TEXT NOT NULL,
+    muscle TEXT NOT NULL DEFAULT '',
+    image1 TEXT DEFAULT '',
+    image2 TEXT DEFAULT ''
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS plan_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    weekday INTEGER NOT NULL,
+    exercise_id INTEGER NOT NULL,
+    scheme TEXT DEFAULT '',
+    current_weight REAL,
+    position INTEGER DEFAULT 0
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS workout_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    date TEXT NOT NULL,
+    plan_item_id INTEGER NOT NULL,
+    UNIQUE(user_id, date, plan_item_id)
+  )
+`);
+
+// Popular a biblioteca global (user_id NULL) a partir do seed, uma única vez
+(function seedExerciseLibrary() {
+  const count = db.prepare('SELECT COUNT(*) AS n FROM exercise_library WHERE user_id IS NULL').get().n;
+  if (count > 0) return;
+  let seed;
+  try {
+    seed = require('./exercise-seed.json');
+  } catch {
+    return;
+  }
+  const insert = db.prepare('INSERT INTO exercise_library (user_id, name, muscle, image1, image2) VALUES (NULL, ?, ?, ?, ?)');
+  const tx = db.transaction(() => {
+    for (const ex of seed) {
+      insert.run(ex.name, ex.muscle, (ex.images && ex.images[0]) || '', (ex.images && ex.images[1]) || '');
+    }
+  });
+  tx();
+})();
 
 // ======== MIGRAÇÕES (banco antigo, dado único -> por usuário) ========
 

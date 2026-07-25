@@ -101,6 +101,46 @@ function formatDate(dateStr) {
   return `${d}/${m}/${y}`;
 }
 
+const MONTHS_SHORT = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+function formatShortDate(dateStr) {
+  const [y, m, d] = dateStr.split('-');
+  return `${parseInt(d, 10)} ${MONTHS_SHORT[parseInt(m, 10) - 1]} ${y.slice(2)}`;
+}
+
+// ======== MOTION ========
+const REDUCED_MOTION = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// Entrada em cascata: aplica .anim-in com delay incremental
+function animateIn(els, step = 0.04, base = 0) {
+  if (REDUCED_MOTION) return;
+  Array.from(els).forEach((el, i) => {
+    el.classList.add('anim-in');
+    el.style.animationDelay = (base + i * step).toFixed(2) + 's';
+  });
+}
+
+// Números que contam do valor atual até o alvo
+function countUp(el, target, opts = {}) {
+  if (!el) return;
+  const decimals = opts.decimals || 0;
+  const suffix = opts.suffix || '';
+  const to = Number(target) || 0;
+  const done = () => { el.textContent = to.toFixed(decimals).replace('.', ',') + suffix; };
+  if (REDUCED_MOTION) return done();
+  const from = parseFloat(String(el.textContent).replace(',', '.')) || 0;
+  if (from === to) return done();
+  const start = performance.now();
+  const dur = 650;
+  function frame(t) {
+    const p = Math.min(1, (t - start) / dur);
+    const eased = 1 - Math.pow(1 - p, 3);
+    el.textContent = (from + (to - from) * eased).toFixed(decimals).replace('.', ',') + suffix;
+    if (p < 1) requestAnimationFrame(frame);
+    else done();
+  }
+  requestAnimationFrame(frame);
+}
+
 // Evolution period selection (click on columns)
 let evoFromId = null;
 let evoToId = null;
@@ -148,13 +188,13 @@ function buildSparkline(field) {
 
   const first = valid[0], last = valid[valid.length - 1];
   const trend = last - first;
-  let color = '#888';
+  let color = '#8e8e93';
   if (field.type === 'waist') {
-    if (trend < 0) color = '#66bb6a';
-    else if (trend > 0) color = '#ffa726';
+    if (trend < 0) color = '#30d158';
+    else if (trend > 0) color = '#ff9f0a';
   } else {
-    if (trend > 0) color = '#66bb6a';
-    else if (trend < 0) color = '#ef5350';
+    if (trend > 0) color = '#30d158';
+    else if (trend < 0) color = '#ff453a';
   }
 
   return `<svg class="sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
@@ -243,22 +283,25 @@ function muscleStateClass(val, prev, type) {
   return diff > 0 ? 'has-value positive' : 'has-value negative';
 }
 
-function buildBodySVG(current, compare) {
+function buildBodySVG(current, compare, withLabels = true) {
   let extras = '';
-  for (const L of BODY_LABELS) {
-    const val = current ? current[L.key] : null;
-    const prev = compare ? compare[L.key] : null;
-    const isLeft = L.side === 'left';
-    const lineStartX = isLeft ? 134 : 486;
-    const lineEndX = L.tx + (isLeft ? -5 : 5);
+  if (withLabels) {
+    for (const L of BODY_LABELS) {
+      const val = current ? current[L.key] : null;
+      const prev = compare ? compare[L.key] : null;
+      const isLeft = L.side === 'left';
+      const lineStartX = isLeft ? 134 : 486;
+      const lineEndX = L.tx + (isLeft ? -5 : 5);
 
-    extras += `<g class="body-label-group" data-key="${L.key}">`;
-    extras += `<path class="body-connector" d="M ${lineStartX} ${L.y + 4} L ${lineEndX} ${L.ty}"/>`;
-    extras += `<circle class="body-connector-dot" cx="${L.tx}" cy="${L.ty}" r="3"/>`;
-    extras += buildLabelTexts(L, val, prev);
-    extras += `</g>`;
+      extras += `<g class="body-label-group" data-key="${L.key}">`;
+      extras += `<path class="body-connector" d="M ${lineStartX} ${L.y + 4} L ${lineEndX} ${L.ty}"/>`;
+      extras += `<circle class="body-connector-dot" cx="${L.tx}" cy="${L.ty}" r="3"/>`;
+      extras += buildLabelTexts(L, val, prev);
+      extras += `</g>`;
+    }
   }
-  return `<svg viewBox="0 0 640 660" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Boneco com medidas corporais">${BODY_SVG_BASE}${extras}</svg>`;
+  const viewBox = withLabels ? '0 0 640 660' : '155 10 330 630';
+  return `<svg viewBox="${viewBox}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Boneco com medidas corporais">${BODY_SVG_BASE}${extras}</svg>`;
 }
 
 function applyMuscleStates(container, current, compare) {
@@ -276,19 +319,21 @@ function applyMuscleStates(container, current, compare) {
 }
 
 function renderBodyDiagram() {
-  const card = document.getElementById('body-card');
   const container = document.getElementById('body-diagram');
   const titleEl = document.getElementById('body-card-title');
   const subEl = document.getElementById('body-card-sub');
-  const weightEl = document.getElementById('body-card-weight');
-  if (!card || !container) return;
+  const pesoEl = document.getElementById('med-peso-value');
+  const pesoDeltaEl = document.getElementById('med-peso-delta');
+  const attrsEl = document.getElementById('med-attrs');
+  if (!container) return;
 
   if (measurements.length === 0) {
     container.innerHTML = '<p class="body-empty">Adicione uma medição para visualizar o boneco.</p>';
-    titleEl.textContent = 'Visualização Corporal';
-    subEl.textContent = '';
-    weightEl.textContent = '';
-    weightEl.className = 'body-weight-pill';
+    titleEl.textContent = 'Última Medição';
+    subEl.textContent = 'Nenhuma medição registrada';
+    pesoEl.textContent = '—';
+    pesoDeltaEl.textContent = '';
+    attrsEl.innerHTML = '';
     renderBodyGoal();
     return;
   }
@@ -298,7 +343,9 @@ function renderBodyDiagram() {
   const hasEvo = evoFromM && evoToM;
 
   const current = hasEvo ? evoToM : measurements[measurements.length - 1];
-  const compare = hasEvo ? evoFromM : null;
+  // Comparação: período selecionado na tabela, senão a medição anterior
+  const compare = hasEvo ? evoFromM
+    : (measurements.length >= 2 ? measurements[measurements.length - 2] : null);
 
   if (hasEvo) {
     titleEl.textContent = 'Comparação de Evolução';
@@ -308,26 +355,61 @@ function renderBodyDiagram() {
     subEl.textContent = `${formatDate(current.date)}${current.label ? ' — ' + current.label : ''}`;
   }
 
-  weightEl.className = 'body-weight-pill';
-  if (current.peso != null) {
-    let html = `${current.peso} kg`;
-    if (compare && compare.peso != null) {
-      const diff = current.peso - compare.peso;
-      const sign = diff > 0 ? '+' : '';
-      const pesoCls = Math.abs(diff) < 0.05 ? '' : diff > 0 ? 'warning' : 'positive';
-      if (pesoCls) weightEl.classList.add(pesoCls);
-      html += ` <span class="delta">(${sign}${diff.toFixed(1)})</span>`;
+  pesoEl.textContent = current.peso != null ? String(current.peso).replace('.', ',') + ' kg' : '—';
+  pesoDeltaEl.textContent = '';
+  pesoDeltaEl.className = 'med-peso-delta';
+  if (compare && compare.peso != null && current.peso != null) {
+    const diff = current.peso - compare.peso;
+    if (Math.abs(diff) >= 0.05) {
+      pesoDeltaEl.textContent = (diff > 0 ? '+' : '') + diff.toFixed(1).replace('.', ',') + ' kg';
+      pesoDeltaEl.classList.add(diff > 0 ? 'warning' : 'positive');
     }
-    weightEl.innerHTML = html;
-  } else {
-    weightEl.textContent = '';
   }
 
-  container.innerHTML = buildBodySVG(current, compare);
-  applyMuscleStates(container, current, compare);
+  container.innerHTML = buildBodySVG(current, compare, false);
+  // Fora do modo comparação o boneco fica neutro; os deltas ficam nos tiles
+  applyMuscleStates(container, current, hasEvo ? compare : null);
   attachBodyInteractions(container, current, compare);
+  renderMedAttrs(current, compare);
 
   renderBodyGoal();
+}
+
+function renderMedAttrs(current, compare) {
+  const grid = document.getElementById('med-attrs');
+  if (!grid) return;
+  grid.innerHTML = '';
+  FIELDS.filter(f => f.key !== 'peso').forEach(f => {
+    const val = current[f.key];
+    const prev = compare ? compare[f.key] : null;
+    let chip = '';
+    if (val != null && prev != null) {
+      const diff = val - prev;
+      if (Math.abs(diff) >= 0.05) {
+        const cls = f.type === 'waist'
+          ? (diff < 0 ? 'positive' : 'warning')
+          : (diff > 0 ? 'positive' : 'negative');
+        chip = `<span class="med-attr-chip ${cls}">${diff > 0 ? '+' : ''}${diff.toFixed(1)}</span>`;
+      }
+    }
+    const tile = document.createElement('div');
+    tile.className = 'med-attr';
+    tile.dataset.key = f.key;
+    tile.innerHTML = `
+      <div class="med-attr-top"><span class="med-attr-name">${f.label}</span>${chip}</div>
+      <span class="med-attr-value">${val != null ? `${val} <small>${f.unit}</small>` : '—'}</span>
+    `;
+    tile.addEventListener('mouseenter', () => {
+      document.querySelectorAll(`#body-diagram .muscle[data-key="${f.key}"]`)
+        .forEach(el => el.classList.add('is-hover'));
+    });
+    tile.addEventListener('mouseleave', () => {
+      document.querySelectorAll(`#body-diagram .muscle[data-key="${f.key}"]`)
+        .forEach(el => el.classList.remove('is-hover'));
+    });
+    grid.appendChild(tile);
+  });
+  animateIn(grid.children, 0.035);
 }
 
 function fmtKg(n) {
@@ -464,6 +546,11 @@ function render() {
   const last = measurements[measurements.length - 1];
   periodEl.textContent = `${formatDate(first.date)} - ${formatDate(last.date)}`;
 
+  const tableSub = document.getElementById('table-sub');
+  if (tableSub) {
+    tableSub.textContent = `${measurements.length} ${measurements.length === 1 ? 'medição' : 'medições'} · ${formatShortDate(first.date)} — ${formatShortDate(last.date)}`;
+  }
+
   const showEvolution = measurements.length >= 2;
 
   // Validate evo selection still exists
@@ -484,8 +571,8 @@ function render() {
     const picking = evoFromId !== null && evoToId === null && !isEvoFrom ? 'evo-pickable' : '';
 
     headHtml += `<th class="${selClass} ${picking}">
-      <span class="header-date" onclick="selectEvoColumn(${m.id})" title="Clique para comparar">${formatDate(m.date)}</span>
-      <span class="header-label">${m.label || ''}</span>
+      <span class="header-date" onclick="selectEvoColumn(${m.id})" title="Clique para comparar">${formatShortDate(m.date)}</span>
+      ${m.label ? `<span class="header-label">${m.label}</span>` : ''}
       <span class="header-actions">
         <button class="btn-icon btn-edit" onclick="editMeasurement(${m.id})" title="Editar">&#9998;</button>
         <button class="btn-icon btn-delete" onclick="deleteMeasurement(${m.id})" title="Excluir">&#10005;</button>
@@ -495,7 +582,7 @@ function render() {
   if (showEvolution) {
     if (hasCustomEvo) {
       headHtml += `<th class="col-evolution col-evolution-period">
-        ${formatDate(evoFromM.date)} → ${formatDate(evoToM.date)}
+        ${formatShortDate(evoFromM.date)} → ${formatShortDate(evoToM.date)}
         <button class="btn-icon btn-evo-clear" onclick="clearEvoSelection()" title="Voltar para evolução total">&#10005;</button>
       </th>`;
     } else {
@@ -525,6 +612,7 @@ function render() {
     bodyHtml += '</tr>';
   });
   tableBody.innerHTML = bodyHtml;
+  animateIn(tableBody.querySelectorAll('tr'), 0.03);
 }
 
 // Modal
@@ -598,7 +686,7 @@ async function loadProfile() {
   return profileData;
 }
 
-document.getElementById('btn-profile').addEventListener('click', async () => {
+async function openProfileModal() {
   const p = await loadProfile();
   document.getElementById('profile-sexo').value = p.sexo || '';
   document.getElementById('profile-idade').value = p.idade || '';
@@ -608,7 +696,9 @@ document.getElementById('btn-profile').addEventListener('click', async () => {
   document.getElementById('profile-rotina').value = p.rotina || '';
   document.getElementById('profile-peso-meta').value = p.peso_meta || '';
   modalProfile.classList.remove('hidden');
-});
+}
+
+document.getElementById('btn-profile-edit').addEventListener('click', openProfileModal);
 
 document.getElementById('btn-profile-cancel').addEventListener('click', () => {
   modalProfile.classList.add('hidden');
@@ -629,11 +719,214 @@ profileForm.addEventListener('submit', async e => {
   });
   modalProfile.classList.add('hidden');
   renderBodyGoal();
+  const perfilTab = document.getElementById('tab-perfil');
+  if (perfilTab && perfilTab.classList.contains('active')) loadPerfilPage();
   const toast = document.createElement('div');
   toast.className = 'toast';
   toast.textContent = 'Perfil salvo!';
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 2100);
+});
+
+// ======== PÁGINA DE PERFIL ========
+let meData = null;
+
+async function loadPerfilPage() {
+  const [p, me, gami, tstats, wstats] = await Promise.all([
+    api('GET', '/api/profile'),
+    api('GET', '/api/me'),
+    api('GET', '/api/gamification'),
+    api('GET', '/api/treino/stats'),
+    api('GET', '/api/water-intake/stats'),
+  ]);
+  profileData = p;
+  meData = me;
+  renderPerfilPage(gami, tstats, wstats);
+}
+
+function imcInfo(peso, alturaCm) {
+  if (!peso || !alturaCm) return null;
+  const imc = peso / Math.pow(alturaCm / 100, 2);
+  let label = 'Normal';
+  let cls = 'positive';
+  if (imc < 18.5) { label = 'Abaixo'; cls = 'warning'; }
+  else if (imc >= 30) { label = 'Obesidade'; cls = 'negative'; }
+  else if (imc >= 25) { label = 'Sobrepeso'; cls = 'warning'; }
+  return { value: imc.toFixed(1), label, cls };
+}
+
+function renderPerfilPage(gami, tstats, wstats) {
+  document.getElementById('perfil-username').textContent = (meData && meData.username) || '—';
+
+  const sinceEl = document.getElementById('perfil-since');
+  if (meData && meData.created_at) {
+    const d = new Date(meData.created_at.replace(' ', 'T') + 'Z');
+    sinceEl.textContent = `Membro desde ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`;
+  } else {
+    sinceEl.textContent = '';
+  }
+
+  if (gami) {
+    document.getElementById('perfil-rank').textContent =
+      `Nível ${gami.level} · ${RANKS[Math.min(gami.level - 1, RANKS.length - 1)]}`;
+    document.getElementById('perfil-xp').textContent = `${gami.xp} XP`;
+  }
+
+  const av = document.getElementById('perfil-avatar');
+  const hasPhoto = !!(profileData && profileData.avatar);
+  av.classList.toggle('has-photo', hasPhoto);
+  av.style.backgroundImage = hasPhoto ? `url(${profileData.avatar})` : '';
+  updateSidebarAvatar();
+
+  const grid = document.getElementById('perfil-attrs');
+  const lastM = measurements.length ? measurements[measurements.length - 1] : null;
+  const tiles = [
+    ['Sexo', profileData.sexo || null, ''],
+    ['Idade', profileData.idade || null, 'anos'],
+    ['Altura', profileData.altura || null, 'cm'],
+    ['Peso atual', lastM && lastM.peso != null ? lastM.peso : null, 'kg'],
+    ['Treinos por semana', profileData.freq || null, 'x'],
+    ['Calorias por dia', profileData.calorias || null, 'kcal'],
+    ['Meta de peso', profileData.peso_meta || null, 'kg'],
+  ];
+  const buildTiles = (el, list) => {
+    el.innerHTML = '';
+    list.forEach(([name, val, unit, chip]) => {
+      const tile = document.createElement('div');
+      tile.className = 'med-attr';
+      tile.innerHTML = `
+        <div class="med-attr-top"><span class="med-attr-name">${name}</span>${chip || ''}</div>
+        <span class="med-attr-value">${val != null && val !== '' ? `${val}${unit ? ' <small>' + unit + '</small>' : ''}` : '—'}</span>
+      `;
+      el.appendChild(tile);
+    });
+    animateIn(el.children, 0.035);
+  };
+
+  buildTiles(grid, tiles);
+
+  // Estatísticas derivadas
+  const statsGrid = document.getElementById('perfil-stats');
+  const imc = imcInfo(lastM && lastM.peso, profileData.altura);
+  const statTiles = [
+    ['IMC', imc ? imc.value : null, '', imc ? `<span class="med-attr-chip ${imc.cls}">${imc.label}</span>` : ''],
+    ['Treinos registrados', tstats ? tstats.totalDays : null, 'dias'],
+    ['Melhor sequência', tstats ? tstats.bestStreak : null, 'dias'],
+    ['Exercícios concluídos', gami ? gami.totalExercises : null, ''],
+    ['Água (média/dia)', wstats && wstats.averageDaily ? (wstats.averageDaily / 1000).toFixed(1).replace('.', ',') : null, 'L'],
+    ['Medições', measurements.length || null, ''],
+  ];
+  buildTiles(statsGrid, statTiles);
+
+  const rotinaCard = document.getElementById('perfil-rotina-card');
+  if (profileData.rotina) {
+    rotinaCard.style.display = '';
+    document.getElementById('perfil-rotina').textContent = profileData.rotina;
+  } else {
+    rotinaCard.style.display = 'none';
+  }
+}
+
+// Upload da foto com editor de corte: o usuário arrasta e dá zoom para escolher o enquadramento
+document.getElementById('perfil-avatar').addEventListener('click', () => {
+  document.getElementById('perfil-avatar-input').click();
+});
+
+const modalCrop = document.getElementById('modal-crop');
+const cropViewport = document.getElementById('crop-viewport');
+const cropImg = document.getElementById('crop-img');
+const cropZoom = document.getElementById('crop-zoom');
+const crop = { minScale: 1, scale: 1, x: 0, y: 0, vw: 320 };
+
+function cropClamp() {
+  const w = cropImg.naturalWidth * crop.scale;
+  const h = cropImg.naturalHeight * crop.scale;
+  crop.x = Math.min(0, Math.max(crop.vw - w, crop.x));
+  crop.y = Math.min(0, Math.max(crop.vw - h, crop.y));
+}
+
+function cropApply() {
+  cropClamp();
+  cropImg.style.width = (cropImg.naturalWidth * crop.scale) + 'px';
+  cropImg.style.transform = `translate(${crop.x}px, ${crop.y}px)`;
+}
+
+document.getElementById('perfil-avatar-input').addEventListener('change', e => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  cropImg.onload = () => {
+    // Abre o modal antes de medir: escondido, o viewport tem largura 0
+    modalCrop.classList.remove('hidden');
+    crop.vw = cropViewport.clientWidth;
+    crop.minScale = crop.vw / Math.min(cropImg.naturalWidth, cropImg.naturalHeight);
+    crop.scale = crop.minScale;
+    // centraliza
+    crop.x = (crop.vw - cropImg.naturalWidth * crop.scale) / 2;
+    crop.y = (crop.vw - cropImg.naturalHeight * crop.scale) / 2;
+    cropZoom.value = 100;
+    cropApply();
+  };
+  cropImg.src = URL.createObjectURL(file);
+  e.target.value = '';
+});
+
+// Arrastar para posicionar
+(function() {
+  let dragging = false;
+  let startX = 0, startY = 0, origX = 0, origY = 0;
+  cropViewport.addEventListener('pointerdown', e => {
+    dragging = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    origX = crop.x;
+    origY = crop.y;
+    cropViewport.setPointerCapture(e.pointerId);
+  });
+  cropViewport.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    crop.x = origX + (e.clientX - startX);
+    crop.y = origY + (e.clientY - startY);
+    cropApply();
+  });
+  cropViewport.addEventListener('pointerup', () => { dragging = false; });
+  cropViewport.addEventListener('pointercancel', () => { dragging = false; });
+})();
+
+// Zoom mantendo o centro
+cropZoom.addEventListener('input', () => {
+  const newScale = crop.minScale * (parseInt(cropZoom.value, 10) / 100);
+  const cx = (crop.vw / 2 - crop.x) / crop.scale;
+  const cy = (crop.vw / 2 - crop.y) / crop.scale;
+  crop.scale = newScale;
+  crop.x = crop.vw / 2 - cx * crop.scale;
+  crop.y = crop.vw / 2 - cy * crop.scale;
+  cropApply();
+});
+
+function closeCropModal() {
+  modalCrop.classList.add('hidden');
+  if (cropImg.src) URL.revokeObjectURL(cropImg.src);
+  cropImg.removeAttribute('src');
+}
+
+document.getElementById('btn-crop-cancel').addEventListener('click', closeCropModal);
+modalCrop.addEventListener('click', e => { if (e.target === modalCrop) closeCropModal(); });
+
+document.getElementById('btn-crop-save').addEventListener('click', async () => {
+  const size = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const sx = -crop.x / crop.scale;
+  const sy = -crop.y / crop.scale;
+  const sSide = crop.vw / crop.scale;
+  ctx.drawImage(cropImg, sx, sy, sSide, sSide, 0, 0, size, size);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+  closeCropModal();
+  profileData = await api('PUT', '/api/profile', { avatar: dataUrl });
+  loadPerfilPage();
+  toastMsg('Foto atualizada!');
 });
 
 // Export Prompt
@@ -710,6 +1003,19 @@ document.getElementById('btn-logout').addEventListener('click', async () => {
   } catch { /* mantém escondido */ }
 })();
 
+// Card do usuário na sidebar: clique abre o perfil; mostra a foto quando houver
+document.getElementById('sidebar-user').addEventListener('click', () => {
+  document.getElementById('btn-profile').click();
+});
+
+function updateSidebarAvatar() {
+  const pic = document.getElementById('sidebar-user-pic');
+  if (!pic) return;
+  const hasPhoto = !!(profileData && profileData.avatar);
+  pic.classList.toggle('has-photo', hasPhoto);
+  pic.style.backgroundImage = hasPhoto ? `url(${profileData.avatar})` : '';
+}
+
 // Migrar perfil do localStorage para o servidor (uma vez)
 async function migrateProfile() {
   const old = localStorage.getItem('gym_profile');
@@ -732,14 +1038,15 @@ const TAB_TITLES = {
   medicoes: 'Medições',
   agua: 'Água',
   treino: 'Treino',
-  carga: 'Progressão de Carga',
+  ciclo: 'Treino da Semana',
+  perfil: 'Perfil',
 };
 
 const TAB_ACTIONS = {
   medicoes: ['btn-export-prompt', 'btn-new'],
-  agua: ['btn-water-config-header'],
+  agua: [],
   treino: [],
-  carga: ['btn-carga-new-header'],
+  ciclo: [],
 };
 
 function updateHeaderActions(tab) {
@@ -768,7 +1075,8 @@ document.querySelectorAll('.nav-btn[data-tab]').forEach(btn => {
     });
     if (tab === 'agua') loadWaterData();
     if (tab === 'treino') loadTreinoData();
-    if (tab === 'carga') loadCargaData();
+    if (tab === 'ciclo') loadCicloData();
+    if (tab === 'perfil') loadPerfilPage();
     if (window.innerWidth <= 800) {
       document.querySelector('.app-shell').classList.remove('sidebar-open');
     }
@@ -814,10 +1122,10 @@ async function loadWaterData() {
 
 function renderWaterUI() {
   // Stats
-  document.getElementById('stat-streak').textContent = waterStats.currentStreak || 0;
-  document.getElementById('stat-best').textContent = waterStats.bestStreak || 0;
-  document.getElementById('stat-total').textContent = waterStats.totalLiters || 0;
-  document.getElementById('stat-avg').textContent = ((waterStats.averageDaily || 0) / 1000).toFixed(1);
+  countUp(document.getElementById('stat-streak'), waterStats.currentStreak || 0);
+  countUp(document.getElementById('stat-best'), waterStats.bestStreak || 0);
+  countUp(document.getElementById('stat-total'), waterStats.totalLiters || 0, { decimals: 1 });
+  countUp(document.getElementById('stat-avg'), (waterStats.averageDaily || 0) / 1000, { decimals: 1 });
 
   // Progress bar for today
   const today = todayStr();
@@ -1091,10 +1399,13 @@ async function loadTreinoData() {
 
 function renderTreinoUI() {
   // Stats
-  document.getElementById('treino-stat-streak').textContent = treinoStats.currentStreak || 0;
-  document.getElementById('treino-stat-best').textContent = treinoStats.bestStreak || 0;
-  document.getElementById('treino-stat-musc').textContent = treinoStats.totalMusc || 0;
-  document.getElementById('treino-stat-corrida').textContent = treinoStats.totalCorrida || 0;
+  countUp(document.getElementById('treino-stat-streak'), treinoStats.currentStreak || 0);
+  countUp(document.getElementById('treino-stat-best'), treinoStats.bestStreak || 0);
+  countUp(document.getElementById('treino-stat-musc'), treinoStats.totalMusc || 0);
+  countUp(document.getElementById('treino-stat-corrida'), treinoStats.totalCorrida || 0);
+
+  const flameWrap = document.getElementById('cal-flame');
+  if (flameWrap) flameWrap.classList.toggle('has-streak', (treinoStats.currentStreak || 0) > 0);
 
   // Flame count (streak)
   const flameCount = document.getElementById('flame-count');
@@ -1292,264 +1603,643 @@ document.getElementById('btn-cal-next').addEventListener('click', () => {
   loadTreinoData();
 });
 
-// ======== PROGRESSAO DE CARGA ========
-const EXERCISES = [
-  'Supino Inclinado', 'Crucifixo', 'Paralela', 'Puxada Aberta', 'Remada Unila.',
-  'Elevação Lat', 'Triceps Francês', 'Panturrilha sentado', 'Panturrilha em pé',
-  'Leg 45 articulado', 'Hack', 'Cadeira extensora', 'Cadeira flexora', 'Abdução',
-  'Rosca 45', 'Desenvolvimento', 'Elevação Front', 'Rosca Scott', 'Triceps Polia',
-  'Smith na máquina', 'Mesa flexora', 'Adutor', 'Pux Art Uni', 'Puxada Neutra',
-  'Remada Apoiada', 'Sup Inclinado', 'Crux Polia Alta', 'Crux Inverso', 'Rosca Direta'
-];
+// ======== CICLO DE TREINO SEMANAL ========
+const WEEKDAY_NAMES = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'];
+const WEEKDAY_SHORT = ['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB', 'DOM'];
+const RANKS = ['Frango', 'Iniciante', 'Aprendiz', 'Consistente', 'Dedicado', 'Casca Grossa', 'Maromba', 'Fibrado', 'Trincado', 'Monstro', 'Lenda'];
+const MUSCLE_LIST = ['Peito', 'Costas', 'Ombro', 'Bíceps', 'Tríceps', 'Quadríceps', 'Posterior', 'Glúteo', 'Panturrilha', 'Abdômen', 'Cardio', 'Outro'];
+const MUSCLE_CLASS = {
+  'Peito': 'm-peito', 'Costas': 'm-costas', 'Ombro': 'm-ombro', 'Bíceps': 'm-biceps',
+  'Tríceps': 'm-triceps', 'Quadríceps': 'm-quadriceps', 'Posterior': 'm-posterior',
+  'Glúteo': 'm-gluteo', 'Panturrilha': 'm-panturrilha', 'Abdômen': 'm-abdomen',
+  'Cardio': 'm-cardio',
+};
+function muscleClass(m) { return MUSCLE_CLASS[m] || 'm-outro'; }
 
-let cargaData = [];
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
 
-// Populate exercise dropdowns
-function populateCargaSelects() {
-  const mainSelect = document.getElementById('carga-exercise');
-  const formSelect = document.getElementById('carga-form-exercise');
-  [mainSelect, formSelect].forEach(sel => {
-    sel.innerHTML = '';
-    EXERCISES.forEach(ex => {
-      const opt = document.createElement('option');
-      opt.value = ex;
-      opt.textContent = ex;
-      sel.appendChild(opt);
-    });
+function toastMsg(text) {
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = text;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 2100);
+}
+
+let cicloPlan = [];
+let cicloLogs = [];
+let cicloGami = {};
+let cicloLibrary = [];
+let selectedWeekday = (new Date().getDay() + 6) % 7;
+let libraryMuscleFilter = '';
+
+function weekDates() {
+  // Datas (YYYY-MM-DD) da semana atual, começando na segunda
+  const now = new Date();
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    return d.toLocaleDateString('en-CA');
   });
 }
 
-populateCargaSelects();
-
-document.getElementById('carga-exercise').addEventListener('change', loadCargaData);
-
-async function loadCargaData() {
-  const exercise = document.getElementById('carga-exercise').value;
-  if (!exercise) return;
-  cargaData = await api('GET', `/api/progressao?exercise=${encodeURIComponent(exercise)}`);
-  renderCargaUI();
+async function loadCicloData() {
+  const dates = weekDates();
+  const [plan, logs, gami, library] = await Promise.all([
+    api('GET', '/api/plan'),
+    api('GET', `/api/workout-log?start=${dates[0]}&end=${dates[6]}`),
+    api('GET', '/api/gamification'),
+    api('GET', '/api/library'),
+  ]);
+  cicloPlan = plan;
+  cicloLogs = logs;
+  cicloGami = gami;
+  cicloLibrary = library;
+  renderCiclo();
 }
 
-function renderCargaUI() {
-  const tbody = document.getElementById('carga-table-body');
-  const emptyEl = document.getElementById('carga-empty');
-  const table = document.getElementById('carga-table');
+function dayItems(weekday) {
+  return cicloPlan.filter(p => p.weekday === weekday);
+}
 
-  if (cargaData.length === 0) {
-    table.style.display = 'none';
-    emptyEl.style.display = '';
-    document.getElementById('carga-stat-atual').textContent = '-';
-    document.getElementById('carga-stat-max').textContent = '-';
-    document.getElementById('carga-stat-total').textContent = '0';
-    document.getElementById('carga-stat-evo').textContent = '-';
-    renderCargaChart();
-    return;
+function isDone(planItemId, date) {
+  return cicloLogs.some(l => l.plan_item_id === planItemId && l.date === date);
+}
+
+function dayComplete(weekday, date) {
+  const items = dayItems(weekday);
+  return items.length > 0 && items.every(p => isDone(p.id, date));
+}
+
+function renderCiclo() {
+  renderGami();
+  renderWeekStrip();
+  renderDay();
+}
+
+function renderGami() {
+  const g = cicloGami;
+  document.getElementById('gami-level').textContent = g.level || 1;
+  document.getElementById('gami-rank').textContent = RANKS[Math.min((g.level || 1) - 1, RANKS.length - 1)];
+  const pctLevel = g.xpForNext ? Math.min(100, (g.xpIntoLevel / g.xpForNext) * 100) : 0;
+  document.getElementById('gami-xp-fill').style.width = pctLevel + '%';
+  document.getElementById('gami-xp-label').textContent = `${g.xpIntoLevel || 0} / ${g.xpForNext || 100} XP para o próximo nível`;
+  countUp(document.getElementById('gami-xp-total'), g.xp || 0);
+  countUp(document.getElementById('gami-ex-total'), g.totalExercises || 0);
+  countUp(document.getElementById('gami-days-total'), g.completeDays || 0);
+
+  // Anel do nível acompanha o progresso do XP dentro do nível
+  const ring = document.getElementById('gami-ring-fill');
+  const C = 2 * Math.PI * 52;
+  ring.style.strokeDasharray = C;
+  ring.style.strokeDashoffset = C * (1 - pctLevel / 100);
+
+  // % da semana atual
+  const dates = weekDates();
+  const planned = cicloPlan.length;
+  let done = 0;
+  cicloPlan.forEach(p => { if (isDone(p.id, dates[p.weekday])) done++; });
+  const weekPct = planned > 0 ? Math.round((done / planned) * 100) : 0;
+  countUp(document.getElementById('gami-week-pct'), weekPct, { suffix: '%' });
+}
+
+function renderWeekStrip() {
+  const strip = document.getElementById('week-strip');
+  const dates = weekDates();
+  const today = todayStr();
+  strip.innerHTML = '';
+  for (let wd = 0; wd < 7; wd++) {
+    const items = dayItems(wd);
+    const done = items.filter(p => isDone(p.id, dates[wd])).length;
+    const complete = items.length > 0 && done >= items.length;
+
+    const btn = document.createElement('button');
+    btn.className = 'week-day';
+    if (wd === selectedWeekday) btn.classList.add('active');
+    if (dates[wd] === today) btn.classList.add('today');
+    if (complete) btn.classList.add('complete');
+
+    const muscles = [...new Set(items.map(p => p.muscle))];
+    btn.innerHTML = `
+      <span class="week-day-name">${WEEKDAY_SHORT[wd]}</span>
+      <span class="week-day-num">${parseInt(dates[wd].slice(8), 10)}</span>
+      <span class="week-day-info">${complete ? '✓' : items.length ? `${done}/${items.length}` : '·'}</span>
+      <span class="week-day-dots">${muscles.slice(0, 3).map(m => `<i class="dot ${muscleClass(m)}"></i>`).join('')}</span>
+    `;
+    btn.addEventListener('click', () => { selectedWeekday = wd; renderCiclo(); });
+    strip.appendChild(btn);
+  }
+}
+
+function renderDay() {
+  const items = dayItems(selectedWeekday);
+  const dates = weekDates();
+  const date = dates[selectedWeekday];
+
+  document.getElementById('day-title').textContent = WEEKDAY_NAMES[selectedWeekday];
+  const muscles = [...new Set(items.map(p => p.muscle))];
+  document.getElementById('day-sub').textContent = muscles.length
+    ? `${formatDate(date)} · ${muscles.join(' + ')}`
+    : formatDate(date);
+
+  const listEl = document.getElementById('day-exercises');
+  const emptyEl = document.getElementById('day-empty');
+  emptyEl.style.display = items.length ? 'none' : '';
+  listEl.innerHTML = '';
+
+  items.forEach((p, idx) => {
+    const done = isDone(p.id, date);
+    const card = document.createElement('div');
+    card.className = 'ex-card' + (done ? ' done' : '');
+    card.style.animationDelay = (idx * 0.045) + 's';
+
+    const thumb = animThumb(p.image1, p.image2);
+
+    card.innerHTML = `
+      <button class="ex-check" title="Concluir em ${formatDate(date)}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+      </button>
+      <div class="ex-thumb" title="Ver evolução de carga">${thumb}</div>
+      <div class="ex-info" title="Ver evolução de carga">
+        <span class="ex-name">${esc(p.name)}</span>
+        <span class="ex-chip ${muscleClass(p.muscle)}">${esc(p.muscle)}</span>
+      </div>
+      <div class="ex-fields">
+        <label class="ex-field">
+          <span>Séries × Reps</span>
+          <input class="ex-scheme" type="text" value="${esc(p.scheme)}" placeholder="3 × 10-12">
+        </label>
+        <label class="ex-field">
+          <span>Carga (kg)</span>
+          <span class="ex-weight">
+            <button class="w-minus" type="button" title="-2,5 kg">−</button>
+            <input class="ex-weight-input" type="number" step="0.5" min="0" value="${p.current_weight != null ? p.current_weight : ''}" placeholder="0">
+            <button class="w-plus" type="button" title="+2,5 kg">+</button>
+          </span>
+        </label>
+      </div>
+      <button class="ex-remove" title="Remover do dia">&#10005;</button>
+    `;
+
+    card.querySelector('.ex-check').addEventListener('click', () => toggleExercise(p, date));
+    card.querySelector('.ex-thumb').addEventListener('click', () => openEvoModal(p));
+    card.querySelector('.ex-info').addEventListener('click', () => openEvoModal(p));
+    card.querySelector('.ex-remove').addEventListener('click', async () => {
+      if (!confirm(`Remover ${p.name} de ${WEEKDAY_NAMES[selectedWeekday]}?`)) return;
+      await api('DELETE', `/api/plan/${p.id}`);
+      await loadCicloData();
+    });
+    card.querySelector('.ex-scheme').addEventListener('change', async e => {
+      await api('PUT', `/api/plan/${p.id}`, { scheme: e.target.value });
+      p.scheme = e.target.value;
+    });
+
+    const weightInput = card.querySelector('.ex-weight-input');
+    const saveWeight = async val => {
+      const num = parseFloat(val);
+      if (isNaN(num)) return;
+      await api('PUT', `/api/plan/${p.id}`, { current_weight: num });
+      p.current_weight = num;
+    };
+    weightInput.addEventListener('change', e => saveWeight(e.target.value));
+    card.querySelector('.w-minus').addEventListener('click', () => {
+      const v = Math.max(0, (parseFloat(weightInput.value) || 0) - 2.5);
+      weightInput.value = v;
+      saveWeight(v);
+    });
+    card.querySelector('.w-plus').addEventListener('click', () => {
+      const v = (parseFloat(weightInput.value) || 0) + 2.5;
+      weightInput.value = v;
+      saveWeight(v);
+    });
+
+    listEl.appendChild(card);
+  });
+}
+
+async function toggleExercise(item, date) {
+  const wasComplete = dayComplete(selectedWeekday, date);
+  const result = await api('POST', '/api/workout-log/toggle', { date, plan_item_id: item.id });
+  if (result.done) {
+    cicloLogs.push({ date, plan_item_id: item.id });
+  } else {
+    cicloLogs = cicloLogs.filter(l => !(l.date === date && l.plan_item_id === item.id));
+  }
+  cicloGami = await api('GET', '/api/gamification');
+  renderCiclo();
+  if (result.done) {
+    if (!wasComplete && dayComplete(selectedWeekday, date)) {
+      confetti();
+      toastMsg('Dia completo! +10 XP e bônus de +30 XP 🏆');
+    } else {
+      toastMsg('+10 XP!');
+    }
+  }
+}
+
+function confetti() {
+  const colors = ['#ffffff', '#d7d7dc', '#9e9ea6', '#6e6e76', '#30d158'];
+  for (let i = 0; i < 60; i++) {
+    const el = document.createElement('div');
+    el.className = 'confetti';
+    el.style.left = Math.random() * 100 + 'vw';
+    el.style.background = colors[i % colors.length];
+    el.style.animationDelay = (Math.random() * 0.4) + 's';
+    el.style.animationDuration = (1.6 + Math.random() * 1.2) + 's';
+    const size = (6 + Math.random() * 6).toFixed(0) + 'px';
+    el.style.width = size;
+    el.style.height = size;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 3400);
+  }
+}
+
+// Animação dos exercícios: as duas poses ficam empilhadas e um único toggle
+// de classe no <body> alterna a opacidade (bem mais leve que trocar src).
+function animThumb(img1, img2) {
+  if (!img1) return `<span class="ex-thumb-fallback">${ICONS.dumbbell}</span>`;
+  return `<span class="ex-anim2">` +
+    `<img src="${esc(img1)}" loading="lazy" decoding="async" alt="">` +
+    `<img class="f2" src="${esc(img2 || img1)}" loading="lazy" decoding="async" alt="">` +
+    `</span>`;
+}
+
+if (!REDUCED_MOTION) {
+  setInterval(() => {
+    if (document.hidden) return;
+    document.body.classList.toggle('anim-flip');
+  }, 900);
+}
+
+// ---- Evolução de carga por exercício ----
+const modalEvo = document.getElementById('modal-evo');
+let evoChartRows = [];
+
+async function openEvoModal(p) {
+  const rows = await api('GET', `/api/progressao?exercise=${encodeURIComponent(p.name)}`);
+  evoChartRows = rows;
+
+  document.getElementById('evoc-title').textContent = p.name;
+  const thumbEl = document.getElementById('evoc-thumb');
+  thumbEl.innerHTML = animThumb(p.image1, p.image2);
+
+  const atual = rows.length ? rows[rows.length - 1].weight : (p.current_weight != null ? p.current_weight : null);
+  const max = rows.length ? Math.max(...rows.map(r => r.weight)) : atual;
+  const fmt = v => v != null ? String(v).replace('.', ',') : '—';
+  const atualEl = document.getElementById('evoc-atual');
+  const maxEl = document.getElementById('evoc-max');
+  if (atual != null) {
+    atualEl.textContent = '0';
+    countUp(atualEl, atual, { decimals: atual % 1 ? 1 : 0 });
+  } else {
+    atualEl.textContent = '—';
+  }
+  if (max != null) {
+    maxEl.textContent = '0';
+    countUp(maxEl, max, { decimals: max % 1 ? 1 : 0 });
+  } else {
+    maxEl.textContent = '—';
   }
 
-  table.style.display = '';
-  emptyEl.style.display = 'none';
+  const ganhoEl = document.getElementById('evoc-ganho');
+  ganhoEl.className = 'evoc-stat-value';
+  if (rows.length >= 2 && rows[0].weight > 0) {
+    const diff = rows[rows.length - 1].weight - rows[0].weight;
+    const pct = (diff / rows[0].weight) * 100;
+    ganhoEl.textContent = `${diff > 0 ? '+' : ''}${fmt(+diff.toFixed(1))} kg (${pct > 0 ? '+' : ''}${pct.toFixed(0)}%)`;
+    if (diff !== 0) ganhoEl.classList.add(diff > 0 ? 'up' : 'down');
+  } else {
+    ganhoEl.textContent = '—';
+  }
 
-  // Stats
-  const last = cargaData[cargaData.length - 1];
-  const first = cargaData[0];
-  const maxWeight = Math.max(...cargaData.map(r => r.weight));
-  const evoPct = first.weight > 0
-    ? (((last.weight - first.weight) / first.weight) * 100).toFixed(1)
-    : '-';
-
-  document.getElementById('carga-stat-atual').textContent = last.weight;
-  document.getElementById('carga-stat-max').textContent = maxWeight;
-  document.getElementById('carga-stat-total').textContent = cargaData.length;
-  document.getElementById('carga-stat-evo').textContent = evoPct !== '-' ? evoPct + '%' : '-';
-
-  // Table
-  let html = '';
-  cargaData.forEach((r, i) => {
-    let evoHtml = '<span class="carga-evo-same">-</span>';
-    if (i > 0) {
-      const diff = r.weight - cargaData[i - 1].weight;
-      if (diff > 0) evoHtml = `<span class="carga-evo-up">+${diff.toFixed(1)}kg</span>`;
-      else if (diff < 0) evoHtml = `<span class="carga-evo-down">${diff.toFixed(1)}kg</span>`;
-      else evoHtml = '<span class="carga-evo-same">0</span>';
-    }
-    html += `<tr>
-      <td>${formatDate(r.date)}</td>
-      <td>${r.weight}</td>
-      <td>${r.sets}</td>
-      <td>${r.reps}</td>
-      <td>${evoHtml}</td>
-      <td>
-        <button class="btn-icon btn-edit" onclick="editCarga(${r.id})" title="Editar">&#9998;</button>
-        <button class="btn-icon btn-delete" onclick="deleteCarga(${r.id})" title="Excluir">&#10005;</button>
-      </td>
-    </tr>`;
-  });
-  tbody.innerHTML = html;
-
-  renderCargaChart();
+  modalEvo.classList.remove('hidden');
+  animateEvoChart();
 }
 
-function renderCargaChart() {
-  const canvas = document.getElementById('carga-chart');
-  const ctx = canvas.getContext('2d');
+// Efeito de entrada: a linha se desenha da esquerda para a direita
+let evocAnimating = false;
+
+function animateEvoChart() {
+  if (REDUCED_MOTION || evoChartRows.length < 2) {
+    drawEvoChart();
+    return;
+  }
+  evocAnimating = true;
+  const start = performance.now();
+  const dur = 950;
+  function frame(t) {
+    const p = Math.min(1, (t - start) / dur);
+    const eased = 1 - Math.pow(1 - p, 3);
+    drawEvoChart(-1, eased);
+    if (p < 1) {
+      requestAnimationFrame(frame);
+    } else {
+      evocAnimating = false;
+      drawEvoChart();
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+let evoPoints = [];
+
+function drawEvoChart(hoverIdx = -1, progress = 1) {
+  const canvas = document.getElementById('evoc-chart');
+  const emptyEl = document.getElementById('evoc-empty');
+  const rows = evoChartRows;
+  const hasData = rows.length >= 2;
+  canvas.style.display = hasData ? '' : 'none';
+  emptyEl.style.display = hasData ? 'none' : '';
+  evoPoints = [];
+  if (!hasData) return;
+
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.parentElement.getBoundingClientRect();
-  canvas.width = rect.width * dpr - 32 * dpr;
-  canvas.height = 220 * dpr;
-  canvas.style.width = (rect.width - 32) + 'px';
-  canvas.style.height = '220px';
+  const w = rect.width;
+  const h = 240;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+  const ctx = canvas.getContext('2d');
   ctx.scale(dpr, dpr);
-
-  const w = rect.width - 32;
-  const h = 220;
   ctx.clearRect(0, 0, w, h);
 
-  if (cargaData.length < 2) {
-    ctx.fillStyle = '#666';
-    ctx.font = '14px system-ui';
-    ctx.textAlign = 'center';
-    ctx.fillText('Adicione pelo menos 2 registros para ver o grafico', w / 2, h / 2);
-    return;
-  }
-
-  const pad = { top: 20, right: 20, bottom: 40, left: 50 };
+  const pad = { top: 16, right: 16, bottom: 34, left: 42 };
   const cw = w - pad.left - pad.right;
   const ch = h - pad.top - pad.bottom;
 
-  const weights = cargaData.map(r => r.weight);
+  const weights = rows.map(r => r.weight);
   const minW = Math.floor(Math.min(...weights) - 2);
   const maxW = Math.ceil(Math.max(...weights) + 2);
   const range = maxW - minW || 1;
+  const px = i => pad.left + (rows.length === 1 ? cw / 2 : (i / (rows.length - 1)) * cw);
+  const py = wgt => pad.top + ch - ((wgt - minW) / range) * ch;
 
-  // Grid lines
-  ctx.strokeStyle = '#333';
+  // Grade horizontal
+  ctx.strokeStyle = '#232326';
   ctx.lineWidth = 1;
-  const gridLines = 5;
+  ctx.fillStyle = '#6b6b72';
+  ctx.font = '10px system-ui';
+  ctx.textAlign = 'right';
+  const gridLines = 4;
   for (let i = 0; i <= gridLines; i++) {
     const y = pad.top + ch - (i / gridLines) * ch;
     ctx.beginPath();
     ctx.moveTo(pad.left, y);
     ctx.lineTo(pad.left + cw, y);
     ctx.stroke();
-    ctx.fillStyle = '#888';
-    ctx.font = '11px system-ui';
-    ctx.textAlign = 'right';
-    ctx.fillText((minW + (i / gridLines) * range).toFixed(0), pad.left - 8, y + 4);
+    ctx.fillText((minW + (i / gridLines) * range).toFixed(0), pad.left - 8, y + 3);
   }
 
-  // Line
-  ctx.strokeStyle = '#4fc3f7';
+  // Recorte horizontal para o efeito de "linha se desenhando"
+  const edgeX = pad.left + cw * progress;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, edgeX + 2, h);
+  ctx.clip();
+
+  // Área preenchida sob a linha
+  const grad = ctx.createLinearGradient(0, pad.top, 0, pad.top + ch);
+  grad.addColorStop(0, 'rgba(255, 255, 255, 0.14)');
+  grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  ctx.beginPath();
+  rows.forEach((r, i) => { i === 0 ? ctx.moveTo(px(i), py(r.weight)) : ctx.lineTo(px(i), py(r.weight)); });
+  ctx.lineTo(px(rows.length - 1), pad.top + ch);
+  ctx.lineTo(px(0), pad.top + ch);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Linha
+  ctx.strokeStyle = '#ffffff';
   ctx.lineWidth = 2;
   ctx.lineJoin = 'round';
   ctx.beginPath();
-  cargaData.forEach((r, i) => {
-    const x = pad.left + (i / (cargaData.length - 1)) * cw;
-    const y = pad.top + ch - ((r.weight - minW) / range) * ch;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
+  rows.forEach((r, i) => { i === 0 ? ctx.moveTo(px(i), py(r.weight)) : ctx.lineTo(px(i), py(r.weight)); });
   ctx.stroke();
 
-  // Points
-  cargaData.forEach((r, i) => {
-    const x = pad.left + (i / (cargaData.length - 1)) * cw;
-    const y = pad.top + ch - ((r.weight - minW) / range) * ch;
+  ctx.restore();
+
+  // Linha-guia vertical no ponto com hover
+  if (progress >= 1 && hoverIdx >= 0 && hoverIdx < rows.length) {
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
     ctx.beginPath();
-    ctx.arc(x, y, 4, 0, Math.PI * 2);
-    ctx.fillStyle = '#4fc3f7';
+    ctx.moveTo(px(hoverIdx), pad.top);
+    ctx.lineTo(px(hoverIdx), pad.top + ch);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Pontos (recorde em verde; hover maior com anel; pop-in conforme a linha avança)
+  const maxVal = Math.max(...weights);
+  rows.forEach((r, i) => {
+    const hovered = i === hoverIdx && progress >= 1;
+    evoPoints.push({ x: px(i), y: py(r.weight), date: r.date, weight: r.weight });
+    const reveal = Math.min(1, Math.max(0, (edgeX - px(i)) / 20));
+    if (reveal <= 0) return;
+    const baseR = hovered ? 6 : r.weight === maxVal ? 4.5 : 3.5;
+    ctx.beginPath();
+    ctx.arc(px(i), py(r.weight), baseR * reveal, 0, Math.PI * 2);
+    ctx.fillStyle = r.weight === maxVal ? '#30d158' : '#ffffff';
     ctx.fill();
-    ctx.strokeStyle = '#1a1a1a';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = hovered ? 'rgba(255, 255, 255, 0.4)' : '#151517';
+    ctx.lineWidth = hovered ? 4 : 2;
     ctx.stroke();
   });
 
-  // X-axis labels (show a few dates)
-  ctx.fillStyle = '#888';
+  // Datas no eixo X
+  ctx.fillStyle = '#6b6b72';
   ctx.font = '10px system-ui';
   ctx.textAlign = 'center';
-  const maxLabels = Math.min(cargaData.length, 8);
-  const step = Math.max(1, Math.floor(cargaData.length / maxLabels));
-  for (let i = 0; i < cargaData.length; i += step) {
-    const x = pad.left + (i / (cargaData.length - 1)) * cw;
-    ctx.fillText(formatDate(cargaData[i].date), x, h - pad.bottom + 18);
+  const step = Math.max(1, Math.ceil(rows.length / 5));
+  for (let i = 0; i < rows.length; i += step) {
+    ctx.fillText(formatShortDate(rows[i].date), px(i), h - 12);
   }
-  // Always show last
-  if ((cargaData.length - 1) % step !== 0) {
-    const x = pad.left + cw;
-    ctx.fillText(formatDate(cargaData[cargaData.length - 1].date), x, h - pad.bottom + 18);
+  // último rótulo só quando não colide com o anterior
+  if ((rows.length - 1) % step >= 2) {
+    ctx.fillText(formatShortDate(rows[rows.length - 1].date), px(rows.length - 1), h - 12);
   }
 }
 
-// Modal carga
-const modalCarga = document.getElementById('modal-carga');
-const cargaForm = document.getElementById('carga-form');
+// Tooltip nos pontos do gráfico
+const evocTooltip = document.createElement('div');
+evocTooltip.className = 'evoc-tooltip';
+evocTooltip.style.display = 'none';
+document.body.appendChild(evocTooltip);
+let evocHover = -1;
 
-document.getElementById('btn-carga-new').addEventListener('click', () => {
-  cargaForm.reset();
-  document.getElementById('carga-form-id').value = '';
-  document.getElementById('modal-carga-title').textContent = 'Novo Registro de Carga';
-  document.getElementById('carga-form-date').value = todayStr();
-  document.getElementById('carga-form-exercise').value = document.getElementById('carga-exercise').value;
-  modalCarga.classList.remove('hidden');
-});
+const evocCanvas = document.getElementById('evoc-chart');
 
-document.getElementById('btn-carga-cancel').addEventListener('click', () => {
-  modalCarga.classList.add('hidden');
-});
-
-modalCarga.addEventListener('click', e => {
-  if (e.target === modalCarga) modalCarga.classList.add('hidden');
-});
-
-cargaForm.addEventListener('submit', async e => {
-  e.preventDefault();
-  const id = document.getElementById('carga-form-id').value;
-  const body = {
-    date: document.getElementById('carga-form-date').value,
-    exercise: document.getElementById('carga-form-exercise').value,
-    weight: parseFloat(document.getElementById('carga-form-weight').value) || 0,
-    sets: parseInt(document.getElementById('carga-form-sets').value) || 0,
-    reps: parseInt(document.getElementById('carga-form-reps').value) || 0,
-  };
-  if (id) {
-    await api('PUT', `/api/progressao/${id}`, body);
-  } else {
-    await api('POST', '/api/progressao', body);
+evocCanvas.addEventListener('pointermove', e => {
+  if (evocAnimating) return;
+  const rect = evocCanvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  let best = -1;
+  let bestD = 20;
+  evoPoints.forEach((p, i) => {
+    const d = Math.hypot(p.x - mx, p.y - my);
+    if (d < bestD) { bestD = d; best = i; }
+  });
+  if (best !== evocHover) {
+    evocHover = best;
+    drawEvoChart(evocHover);
   }
-  modalCarga.classList.add('hidden');
-  // Switch main dropdown to the exercise that was saved
-  document.getElementById('carga-exercise').value = body.exercise;
-  await loadCargaData();
-  const toast = document.createElement('div');
-  toast.className = 'toast';
-  toast.textContent = 'Registro salvo!';
-  document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), 2100);
+  if (best >= 0) {
+    const p = evoPoints[best];
+    const fmtW = v => String(+(+v).toFixed(1)).replace('.', ',');
+    let deltaHtml = '';
+    if (best > 0) {
+      const diff = p.weight - evoPoints[best - 1].weight;
+      if (diff !== 0) {
+        deltaHtml = ` <span class="${diff > 0 ? 'up' : 'down'}">${diff > 0 ? '+' : ''}${fmtW(diff)}</span>`;
+      }
+    }
+    const record = p.weight === Math.max(...evoPoints.map(q => q.weight)) ? ' 🏆' : '';
+    evocTooltip.innerHTML = `<strong>${fmtW(p.weight)} kg</strong>${deltaHtml}${record}<span class="tt-date">${formatShortDate(p.date)}</span>`;
+    evocTooltip.style.display = 'block';
+    const ttw = evocTooltip.offsetWidth;
+    evocTooltip.style.left = Math.min(e.clientX + 14, window.innerWidth - ttw - 10) + 'px';
+    evocTooltip.style.top = (e.clientY - 48) + 'px';
+    evocCanvas.style.cursor = 'pointer';
+  } else {
+    evocTooltip.style.display = 'none';
+    evocCanvas.style.cursor = 'default';
+  }
 });
 
-window.editCarga = function(id) {
-  const r = cargaData.find(x => x.id === id);
-  if (!r) return;
-  document.getElementById('carga-form-id').value = r.id;
-  document.getElementById('modal-carga-title').textContent = 'Editar Registro de Carga';
-  document.getElementById('carga-form-date').value = r.date;
-  document.getElementById('carga-form-exercise').value = r.exercise;
-  document.getElementById('carga-form-weight').value = r.weight;
-  document.getElementById('carga-form-sets').value = r.sets;
-  document.getElementById('carga-form-reps').value = r.reps;
-  modalCarga.classList.remove('hidden');
-};
+evocCanvas.addEventListener('pointerleave', () => {
+  evocTooltip.style.display = 'none';
+  if (evocHover !== -1) { evocHover = -1; drawEvoChart(); }
+});
 
-window.deleteCarga = async function(id) {
-  if (!confirm('Excluir este registro?')) return;
-  await api('DELETE', `/api/progressao/${id}`);
-  await loadCargaData();
-  const toast = document.createElement('div');
-  toast.className = 'toast';
-  toast.textContent = 'Registro excluido';
-  document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), 2100);
-};
+function closeEvoModal() {
+  modalEvo.classList.add('hidden');
+  evocTooltip.style.display = 'none';
+  evocHover = -1;
+}
+
+document.getElementById('btn-evoc-close').addEventListener('click', closeEvoModal);
+modalEvo.addEventListener('click', e => { if (e.target === modalEvo) closeEvoModal(); });
+
+// ---- Biblioteca de exercícios ----
+const modalLibrary = document.getElementById('modal-library');
+const libraryGrid = document.getElementById('library-grid');
+const librarySearch = document.getElementById('library-search');
+
+document.getElementById('btn-add-exercise').addEventListener('click', () => {
+  document.getElementById('library-day-hint').textContent = `Toque em um exercício para adicionar em ${WEEKDAY_NAMES[selectedWeekday]}`;
+  librarySearch.value = '';
+  libraryMuscleFilter = '';
+  renderLibrary();
+  modalLibrary.classList.remove('hidden');
+});
+
+document.getElementById('btn-library-close').addEventListener('click', () => modalLibrary.classList.add('hidden'));
+modalLibrary.addEventListener('click', e => { if (e.target === modalLibrary) modalLibrary.classList.add('hidden'); });
+librarySearch.addEventListener('input', renderLibrary);
+
+function renderLibrary() {
+  const musclesEl = document.getElementById('library-muscles');
+  const muscles = [...new Set(cicloLibrary.map(e => e.muscle))];
+  musclesEl.innerHTML = '';
+  const mkChip = (label, value) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'muscle-chip ' + (value ? muscleClass(value) : 'm-outro');
+    if (libraryMuscleFilter === value) b.classList.add('active');
+    b.textContent = label;
+    b.addEventListener('click', () => { libraryMuscleFilter = value; renderLibrary(); });
+    musclesEl.appendChild(b);
+  };
+  mkChip('Todos', '');
+  muscles.forEach(m => mkChip(m, m));
+
+  const q = librarySearch.value.trim().toLowerCase();
+  const inDay = new Set(dayItems(selectedWeekday).map(p => p.exercise_id));
+  const list = cicloLibrary.filter(e =>
+    (!libraryMuscleFilter || e.muscle === libraryMuscleFilter) &&
+    (!q || e.name.toLowerCase().includes(q))
+  );
+
+  libraryGrid.innerHTML = '';
+  list.forEach(e => {
+    const added = inDay.has(e.id);
+    const card = document.createElement('div');
+    card.className = 'lib-card' + (added ? ' in-day' : '');
+    const thumb = animThumb(e.image1, e.image2);
+    card.innerHTML = `
+      <div class="lib-thumb">${thumb}</div>
+      <div class="lib-info">
+        <span class="lib-name">${esc(e.name)}</span>
+        <span class="ex-chip ${muscleClass(e.muscle)}">${esc(e.muscle)}</span>
+      </div>
+      <span class="lib-add">${added ? '✓ no dia' : '+ adicionar'}</span>
+      ${e.user_id ? '<button class="lib-del" title="Excluir da biblioteca">&#10005;</button>' : ''}
+    `;
+    card.addEventListener('click', async ev => {
+      if (ev.target.closest('.lib-del')) return;
+      if (inDay.has(e.id)) return;
+      await api('POST', '/api/plan', { weekday: selectedWeekday, exercise_id: e.id });
+      toastMsg(`${e.name} adicionado em ${WEEKDAY_NAMES[selectedWeekday]}`);
+      await loadCicloData();
+      renderLibrary();
+    });
+    const del = card.querySelector('.lib-del');
+    if (del) {
+      del.addEventListener('click', async () => {
+        if (!confirm(`Excluir "${e.name}" da biblioteca?`)) return;
+        await api('DELETE', `/api/library/${e.id}`);
+        await loadCicloData();
+        renderLibrary();
+      });
+    }
+    libraryGrid.appendChild(card);
+  });
+  animateIn(libraryGrid.children, 0.015);
+}
+
+// ---- Exercício personalizado ----
+const modalCustomEx = document.getElementById('modal-custom-ex');
+const customExForm = document.getElementById('custom-ex-form');
+
+(function populateCustomMuscles() {
+  const sel = document.getElementById('custom-ex-muscle');
+  MUSCLE_LIST.forEach(m => {
+    const o = document.createElement('option');
+    o.value = m;
+    o.textContent = m;
+    sel.appendChild(o);
+  });
+})();
+
+document.getElementById('btn-custom-exercise').addEventListener('click', () => {
+  customExForm.reset();
+  modalCustomEx.classList.remove('hidden');
+});
+document.getElementById('btn-custom-ex-cancel').addEventListener('click', () => modalCustomEx.classList.add('hidden'));
+modalCustomEx.addEventListener('click', e => { if (e.target === modalCustomEx) modalCustomEx.classList.add('hidden'); });
+
+customExForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  const created = await api('POST', '/api/library', {
+    name: document.getElementById('custom-ex-name').value,
+    muscle: document.getElementById('custom-ex-muscle').value,
+  });
+  modalCustomEx.classList.add('hidden');
+  cicloLibrary = await api('GET', '/api/library');
+  renderLibrary();
+  toastMsg(`${created.name} criado!`);
+});
+
 
 // Toggle body diagram
 (function() {
@@ -1583,4 +2273,4 @@ injectIcons();
 updateHeaderActions('medicoes');
 loadData();
 migrateProfile();
-loadProfile().then(renderBodyGoal).catch(() => {});
+loadProfile().then(() => { renderBodyGoal(); updateSidebarAvatar(); }).catch(() => {});

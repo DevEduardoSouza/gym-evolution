@@ -24,16 +24,19 @@
         <button class="nav-btn" data-tab="treino">
           <span class="nav-icon" data-icon="dumbbell"></span><span class="nav-label">Treino</span>
         </button>
-        <button class="nav-btn" data-tab="carga">
-          <span class="nav-icon" data-icon="chart"></span><span class="nav-label">Carga</span>
+        <button class="nav-btn" data-tab="ciclo">
+          <span class="nav-icon" data-icon="calendar"></span><span class="nav-label">Semana</span>
         </button>
       </nav>
       <div class="sidebar-footer">
-        <div class="sidebar-user" id="sidebar-user" hidden>
-          <span class="sidebar-user-label">Logado como</span>
-          <span class="sidebar-user-name" id="sidebar-username"></span>
-        </div>
-        <button id="btn-profile" class="nav-btn" title="Editar perfil">
+        <button class="sidebar-user" id="sidebar-user" hidden>
+          <span class="sidebar-user-pic" id="sidebar-user-pic"><span data-icon="user"></span></span>
+          <span class="sidebar-user-txt">
+            <span class="sidebar-user-name" id="sidebar-username"></span>
+            <span class="sidebar-user-label">Ver perfil</span>
+          </span>
+        </button>
+        <button id="btn-profile" class="nav-btn" data-tab="perfil" title="Meu perfil" hidden>
           <span class="nav-icon" data-icon="user"></span><span class="nav-label">Perfil</span>
         </button>
         <button id="btn-logout" class="nav-btn nav-btn-logout" title="Sair">
@@ -58,38 +61,52 @@
         </header>
 
     <div id="tab-medicoes" class="tab-panel active">
-      <div class="body-card" id="body-card">
-        <div class="body-card-header">
-          <div>
-            <h3 id="body-card-title">Visualização Corporal</h3>
-            <p id="body-card-sub" class="body-card-sub"></p>
+      <div class="med-hero" id="med-hero">
+        <div class="med-hero-left">
+          <div class="med-hero-head">
+            <h3 id="body-card-title">Última Medição</h3>
+            <p id="body-card-sub" class="med-hero-sub"></p>
           </div>
-          <div class="body-card-actions">
-            <span id="body-card-weight" class="body-weight-pill"></span>
-            <button id="btn-toggle-body" class="btn-secondary btn-sm" title="Ocultar/Mostrar boneco">Ocultar</button>
+          <div class="med-peso">
+            <span class="med-peso-value" id="med-peso-value">—</span>
+            <span class="med-peso-delta" id="med-peso-delta"></span>
           </div>
+          <p class="med-peso-label">Peso atual</p>
+          <div class="body-goal" id="body-goal" style="display:none">
+            <div class="body-goal-head">
+              <span class="body-goal-label"><span data-icon="target"></span> Meta de peso</span>
+              <span class="body-goal-status" id="body-goal-status"></span>
+            </div>
+            <div class="body-goal-track">
+              <div class="body-goal-fill" id="body-goal-fill"></div>
+            </div>
+            <div class="body-goal-ends">
+              <span id="body-goal-start"></span>
+              <span id="body-goal-target"></span>
+            </div>
+          </div>
+          <h4 class="med-attr-title">Medidas</h4>
+          <div class="med-attrs" id="med-attrs"></div>
         </div>
-        <div class="body-goal" id="body-goal" style="display:none">
-          <div class="body-goal-head">
-            <span class="body-goal-label"><span data-icon="target"></span> Meta de peso</span>
-            <span class="body-goal-status" id="body-goal-status"></span>
-          </div>
-          <div class="body-goal-track">
-            <div class="body-goal-fill" id="body-goal-fill"></div>
-          </div>
-          <div class="body-goal-ends">
-            <span id="body-goal-start"></span>
-            <span id="body-goal-target"></span>
-          </div>
+        <div class="med-hero-right">
+          <div class="body-diagram" id="body-diagram"></div>
         </div>
-        <div class="body-diagram" id="body-diagram"></div>
       </div>
       <div id="body-tooltip" class="body-tooltip" style="display:none"></div>
       <div class="table-wrapper">
-        <table id="measurements-table">
-          <thead id="table-head"></thead>
-          <tbody id="table-body"></tbody>
-        </table>
+        <div class="table-bar">
+          <div>
+            <h3>Histórico de Medições</h3>
+            <p id="table-sub" class="table-sub"></p>
+          </div>
+          <span class="table-hint">Clique em duas datas para comparar períodos</span>
+        </div>
+        <div class="table-scroll">
+          <table id="measurements-table">
+            <thead id="table-head"></thead>
+            <tbody id="table-body"></tbody>
+          </table>
+        </div>
         <p id="empty-msg" class="empty-msg">Nenhuma medição registrada. Clique em "+ Nova Medição" para começar.</p>
       </div>
     </div>
@@ -220,89 +237,180 @@
       </div>
     </div>
 
-    <div id="tab-carga" class="tab-panel">
-      <div class="carga-header">
-        <div class="carga-select-row">
-          <div class="form-group">
-            <label for="carga-exercise">Exercicio</label>
-            <select id="carga-exercise"></select>
+    <div id="tab-ciclo" class="tab-panel">
+      <div class="gami-hero">
+        <div class="gami-level-card">
+          <div class="gami-ring">
+            <svg viewBox="0 0 120 120" aria-hidden="true">
+              <circle class="gami-ring-track" cx="60" cy="60" r="52"/>
+              <circle class="gami-ring-fill" id="gami-ring-fill" cx="60" cy="60" r="52"/>
+            </svg>
+            <div class="gami-ring-center">
+              <span class="gami-level-tag">Nível</span>
+              <span class="gami-level-num" id="gami-level">1</span>
+            </div>
           </div>
-          <button id="btn-carga-new" class="btn-primary">+ Registro</button>
+          <div class="gami-level-info">
+            <span class="gami-rank" id="gami-rank">Frango</span>
+            <div class="gami-xp-bar"><div class="gami-xp-fill" id="gami-xp-fill" style="width:0%"></div></div>
+            <span class="gami-xp-label" id="gami-xp-label">0 / 100 XP para o próximo nível</span>
+          </div>
+        </div>
+        <div class="gami-stats">
+          <div class="stat-card">
+            <span class="stat-value gami-gold" id="gami-xp-total">0</span>
+            <span class="stat-label">XP Total</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value" id="gami-ex-total">0</span>
+            <span class="stat-label">Exercícios Feitos</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value" id="gami-days-total">0</span>
+            <span class="stat-label">Dias Completos</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value" id="gami-week-pct">0%</span>
+            <span class="stat-label">Semana Atual</span>
+          </div>
         </div>
       </div>
 
-      <div class="carga-stats" id="carga-stats">
-        <div class="stat-card">
-          <span class="stat-value" id="carga-stat-atual">-</span>
-          <span class="stat-label">Peso Atual (kg)</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-value" id="carga-stat-max">-</span>
-          <span class="stat-label">Peso Maximo (kg)</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-value" id="carga-stat-total">0</span>
-          <span class="stat-label">Total Registros</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-value" id="carga-stat-evo">-</span>
-          <span class="stat-label">Evolucao %</span>
-        </div>
-      </div>
+      <div class="week-strip" id="week-strip"></div>
 
-      <div class="carga-chart-wrapper">
-        <canvas id="carga-chart" height="220"></canvas>
+      <div class="day-panel">
+        <div class="day-panel-header">
+          <div>
+            <h3 id="day-title">Segunda</h3>
+            <p id="day-sub" class="day-sub"></p>
+          </div>
+          <button id="btn-add-exercise" class="btn-primary"><span data-icon="plus"></span> Exercício</button>
+        </div>
+        <div id="day-exercises" class="day-exercises"></div>
+        <p id="day-empty" class="empty-msg">Dia livre! Adicione exercícios da biblioteca para montar o treino.</p>
       </div>
+    </div>
 
-      <div class="carga-table-wrapper">
-        <table id="carga-table">
-          <thead>
-            <tr>
-              <th>Data</th>
-              <th>Peso (kg)</th>
-              <th>Series</th>
-              <th>Reps</th>
-              <th>Evolucao</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="carga-table-body"></tbody>
-        </table>
-        <p id="carga-empty" class="empty-msg">Selecione um exercicio e adicione registros.</p>
+    <div id="tab-perfil" class="tab-panel">
+      <div class="perfil-hero">
+        <div class="perfil-left">
+          <div class="perfil-head">
+            <div>
+              <h3 id="perfil-username">—</h3>
+              <p class="perfil-since" id="perfil-since"></p>
+            </div>
+            <button id="btn-profile-edit" class="btn-secondary btn-sm"><span data-icon="edit"></span> Editar dados</button>
+          </div>
+          <div class="perfil-chips">
+            <span class="perfil-chip perfil-chip-rank" id="perfil-rank">Nível 1 · Frango</span>
+            <span class="perfil-chip" id="perfil-xp">0 XP</span>
+          </div>
+          <h4 class="med-attr-title">Dados</h4>
+          <div class="med-attrs" id="perfil-attrs"></div>
+          <h4 class="med-attr-title" style="margin-top:14px">Estatísticas</h4>
+          <div class="med-attrs" id="perfil-stats"></div>
+          <div class="perfil-rotina" id="perfil-rotina-card" style="display:none">
+            <span class="med-attr-name">Rotina</span>
+            <p id="perfil-rotina"></p>
+          </div>
+        </div>
+        <div class="perfil-photo" id="perfil-avatar" title="Trocar foto">
+          <span class="perfil-avatar-fallback" data-icon="user"></span>
+          <div class="perfil-avatar-overlay">Trocar foto</div>
+        </div>
+        <input type="file" id="perfil-avatar-input" accept="image/*" hidden>
       </div>
     </div>
   </div>
 
-  <!-- Modal Carga -->
-  <div id="modal-carga" class="modal-overlay hidden">
+  <!-- Modal Biblioteca de Exercícios -->
+  <div id="modal-library" class="modal-overlay hidden">
+    <div class="modal modal-library">
+      <div class="library-head">
+        <h2>Biblioteca de Exercícios</h2>
+        <p class="profile-hint" id="library-day-hint"></p>
+      </div>
+      <input type="search" id="library-search" class="library-search" placeholder="Buscar exercício...">
+      <div id="library-muscles" class="library-muscles"></div>
+      <div id="library-grid" class="library-grid"></div>
+      <div class="form-actions library-footer">
+        <button type="button" id="btn-custom-exercise" class="btn-secondary"><span data-icon="plus"></span> Criar exercício</button>
+        <button type="button" id="btn-library-close" class="btn-primary">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de evolução de carga -->
+  <div id="modal-evo" class="modal-overlay hidden">
+    <div class="modal modal-evo">
+      <div class="evoc-head">
+        <div class="evoc-thumb" id="evoc-thumb"></div>
+        <div>
+          <h2 id="evoc-title">Exercício</h2>
+          <p class="profile-hint" id="evoc-sub">Evolução da carga máxima ao longo do tempo</p>
+        </div>
+      </div>
+      <div class="evoc-stats">
+        <div class="evoc-stat">
+          <span class="evoc-stat-value" id="evoc-atual">—</span>
+          <span class="evoc-stat-label">Atual (kg)</span>
+        </div>
+        <div class="evoc-stat">
+          <span class="evoc-stat-value" id="evoc-max">—</span>
+          <span class="evoc-stat-label">Máxima (kg)</span>
+        </div>
+        <div class="evoc-stat">
+          <span class="evoc-stat-value" id="evoc-ganho">—</span>
+          <span class="evoc-stat-label">Evolução</span>
+        </div>
+      </div>
+      <div class="evoc-chart-wrap">
+        <canvas id="evoc-chart" height="240"></canvas>
+        <p id="evoc-empty" class="empty-msg" style="display:none">Sem histórico ainda. Ajuste a carga no exercício que a primeira entrada é registrada automaticamente.</p>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn-primary" id="btn-evoc-close">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de corte da foto -->
+  <div id="modal-crop" class="modal-overlay hidden">
+    <div class="modal modal-crop">
+      <h2>Ajustar foto</h2>
+      <p class="profile-hint">Arraste a imagem para posicionar e use o zoom para enquadrar.</p>
+      <div class="crop-viewport" id="crop-viewport">
+        <img id="crop-img" alt="" draggable="false">
+      </div>
+      <div class="crop-zoom-row">
+        <span>−</span>
+        <input type="range" id="crop-zoom" min="100" max="300" value="100">
+        <span>+</span>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn-secondary" id="btn-crop-cancel">Cancelar</button>
+        <button type="button" class="btn-primary" id="btn-crop-save">Salvar foto</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Exercício Personalizado -->
+  <div id="modal-custom-ex" class="modal-overlay hidden">
     <div class="modal">
-      <h2 id="modal-carga-title">Novo Registro de Carga</h2>
-      <form id="carga-form">
-        <input type="hidden" id="carga-form-id">
+      <h2>Criar Exercício</h2>
+      <form id="custom-ex-form">
         <div class="form-grid">
           <div class="form-group">
-            <label for="carga-form-date">Data</label>
-            <input type="date" id="carga-form-date" required>
+            <label for="custom-ex-name">Nome</label>
+            <input type="text" id="custom-ex-name" required placeholder="Ex: Remada Cavalinho">
           </div>
           <div class="form-group">
-            <label for="carga-form-exercise">Exercicio</label>
-            <select id="carga-form-exercise" required></select>
-          </div>
-          <div class="form-group">
-            <label for="carga-form-weight">Peso (kg)</label>
-            <input type="number" id="carga-form-weight" step="0.5" min="0" required>
-          </div>
-          <div class="form-group">
-            <label for="carga-form-sets">Series</label>
-            <input type="number" id="carga-form-sets" min="1" required>
-          </div>
-          <div class="form-group">
-            <label for="carga-form-reps">Reps</label>
-            <input type="number" id="carga-form-reps" min="1" required>
+            <label for="custom-ex-muscle">Grupo muscular</label>
+            <select id="custom-ex-muscle"></select>
           </div>
         </div>
         <div class="form-actions">
-          <button type="button" id="btn-carga-cancel" class="btn-secondary">Cancelar</button>
+          <button type="button" id="btn-custom-ex-cancel" class="btn-secondary">Cancelar</button>
           <button type="submit" class="btn-primary">Salvar</button>
         </div>
       </form>
