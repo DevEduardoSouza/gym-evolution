@@ -4220,3 +4220,30 @@ button, a, input, select, textarea, label, canvas,
 .pub-photo { cursor: default; }
 .pub-photo:hover { border-color: var(--card-3); }
 #pub-stats-grid .med-attr-value { font-size: 1.15rem; }
+
+/* Foto de perfil na notificação (emoji vira mini-badge) */
+.notif-photo {
+  background-size: cover;
+  background-position: center;
+  position: relative;
+  overflow: visible;
+}
+.notif-mini {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  font-size: 0.72rem;
+  font-style: normal;
+  background: var(--card);
+  border: 1px solid var(--border-soft);
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.notif-row.clickable { cursor: pointer; transition: border-color 0.2s ease, transform 0.15s ease; }
+.notif-row.clickable:hover { border-color: #48484c; transform: translateY(-1px); }

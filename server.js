@@ -654,12 +654,12 @@ const RANKS = ['Frango', 'Iniciante', 'Aprendiz', 'Consistente', 'Dedicado', 'Ca
 
 // ======== NOTIFICAÇÕES ========
 
-function notify(userId, kind, ref, icon, title, body) {
+function notify(userId, kind, ref, icon, title, body, actorId) {
   try {
     db.prepare(`
-      INSERT OR IGNORE INTO notifications (user_id, kind, ref, icon, title, body)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(userId, kind, String(ref || ''), icon, title, body || '');
+      INSERT OR IGNORE INTO notifications (user_id, kind, ref, icon, title, body, actor_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(userId, kind, String(ref || ''), icon, title, body || '', actorId || null);
   } catch { /* nunca derruba a ação principal */ }
 }
 
@@ -718,7 +718,7 @@ function emitProgressNotifs(uid, before) {
       const wasAhead = uBefore.weekXp >= meBefore.weekXp && uBefore.weekXp > 0;
       const nowBehind = u.weekXp < meAfter.weekXp;
       if (wasAhead && nowBehind) {
-        notify(u.id, 'ranking', `ovr:${today}:${myName}`, '🏃', `${myName} passou você no ranking!`, 'Bora treinar pra recuperar a posição no ranking da semana.');
+        notify(u.id, 'ranking', `ovr:${today}:${myName}`, '🏃', `${myName} passou você no ranking!`, 'Bora treinar pra recuperar a posição no ranking da semana.', uid);
       }
     });
   }
@@ -726,9 +726,15 @@ function emitProgressNotifs(uid, before) {
 
 app.get('/api/notifications', (req, res) => {
   const uid = req.session.userId;
-  const items = db.prepare(
-    'SELECT id, icon, title, body, created_at, read FROM notifications WHERE user_id = ? ORDER BY id DESC LIMIT 30'
-  ).all(uid);
+  const items = db.prepare(`
+    SELECT n.id, n.icon, n.title, n.body, n.created_at, n.read,
+           p.avatar AS actor_avatar, au.username AS actor_username
+    FROM notifications n
+    LEFT JOIN profile p ON p.user_id = n.actor_id
+    LEFT JOIN users au ON au.id = n.actor_id
+    WHERE n.user_id = ?
+    ORDER BY n.id DESC LIMIT 30
+  `).all(uid);
   const unread = db.prepare('SELECT COUNT(*) n FROM notifications WHERE user_id = ? AND read = 0').get(uid).n;
   res.json({ unread, items });
 });
@@ -983,7 +989,7 @@ app.post('/api/users/:username/follow', (req, res) => {
   } else {
     db.prepare('INSERT OR IGNORE INTO follows (follower_id, followed_id) VALUES (?, ?)').run(me, u.id);
     const myName = db.prepare('SELECT username FROM users WHERE id = ?').get(me).username;
-    notify(u.id, 'follow', `f:${myName}`, '🫡', `${myName} começou a seguir você`, 'Agora seus recordes têm plateia. Bora treinar!');
+    notify(u.id, 'follow', `f:${myName}`, '🫡', `${myName} começou a seguir você`, 'Agora seus recordes têm plateia. Bora treinar!', me);
   }
   res.json({ isFollowing: !existing, ...followCounts(u.id) });
 });

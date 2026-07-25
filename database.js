@@ -97,11 +97,17 @@ db.exec(`
     icon TEXT DEFAULT '🔔',
     title TEXT NOT NULL,
     body TEXT DEFAULT '',
+    actor_id INTEGER,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     read INTEGER NOT NULL DEFAULT 0,
     UNIQUE(user_id, kind, ref)
   )
 `);
+
+// Migração: autor da notificação (para mostrar a foto de perfil)
+if (!tableColumns('notifications').includes('actor_id')) {
+  db.exec('ALTER TABLE notifications ADD COLUMN actor_id INTEGER');
+}
 
 // Fotos de progresso (shape check)
 db.exec(`

@@ -2896,14 +2896,22 @@ async function loadNotifs() {
   data.items.forEach(n => {
     const row = document.createElement('div');
     row.className = 'notif-row' + (n.read ? '' : ' unread');
+    const pic = n.actor_avatar
+      ? `<span class="notif-icon notif-photo" style="background-image:url(${n.actor_avatar})"><i class="notif-mini">${n.icon}</i></span>`
+      : `<span class="notif-icon">${n.icon}</span>`;
     row.innerHTML = `
-      <span class="notif-icon">${n.icon}</span>
+      ${pic}
       <span class="notif-txt">
         <span class="notif-title">${esc(n.title)}</span>
         ${n.body ? `<span class="notif-body">${esc(n.body)}</span>` : ''}
       </span>
       <span class="notif-time">${timeAgo(n.created_at)}</span>
     `;
+    if (n.actor_username) {
+      row.classList.add('clickable');
+      row.title = `Ver perfil de ${n.actor_username}`;
+      row.addEventListener('click', () => openPublicProfile(n.actor_username));
+    }
     list.appendChild(row);
   });
   animateIn(list.children, 0.03);
@@ -3028,11 +3036,11 @@ function wrappedStatsGrid(ctx, W, y, stats, rowH = 170) {
     const cx = (i % 2) * colW + colW / 2;
     const cy = y + Math.floor(i / 2) * rowH;
     ctx.fillStyle = s[2] || '#fff';
-    ctx.font = '800 72px system-ui';
+    ctx.font = '800 65px system-ui';
     ctx.fillText(s[0], cx, cy);
     ctx.fillStyle = '#6b6b72';
-    ctx.font = '600 34px system-ui';
-    ctx.fillText(s[1], cx, cy + 48);
+    ctx.font = '600 31px system-ui';
+    ctx.fillText(s[1], cx, cy + 44);
   });
   return y + Math.ceil(stats.length / 2) * rowH;
 }
@@ -3047,8 +3055,8 @@ function volumeEquiv(kg) {
 }
 
 function wrappedFooter(ctx, W, H) {
-  ctx.fillStyle = '#48484c';
-  ctx.font = '700 32px system-ui';
+  ctx.fillStyle = '#8e8e93';
+  ctx.font = '800 38px system-ui';
   ctx.fillText('gym.genustech.com.br', W / 2, H - 70);
 }
 
@@ -3066,45 +3074,45 @@ function drawWrappedTreino() {
   wrappedBase(ctx, W, H, 'últimos 30 dias');
   let y = wrappedIdentity(ctx, W, username, `Nível ${data.level} · ${rank}`);
 
-  y += 158;
+  y += 150;
   ctx.fillStyle = '#fff';
-  ctx.font = '800 210px system-ui';
+  ctx.font = '800 175px system-ui';
   ctx.fillText(String(data.treinos), center, y);
-  y += 56;
+  y += 52;
   ctx.fillStyle = '#8e8e93';
-  ctx.font = '700 44px system-ui';
+  ctx.font = '700 40px system-ui';
   ctx.fillText(data.treinos === 1 ? 'dia de treino' : 'dias de treino', center, y);
 
-  y += 85;
+  y += 80;
   y = wrappedStatsGrid(ctx, W, y, [
     [wrappedFmt(data.sets), 'séries feitas'],
     [wrappedFmt(data.reps), 'reps no total'],
     [wrappedFmt(data.volumeKg) + ' kg', 'movimentados'],
     [`${data.bestStreak} ${data.bestStreak === 1 ? 'dia' : 'dias'} 🔥`, 'seguidos treinando'],
-  ], 150);
+  ], 138);
 
   // Equivalência divertida do volume
   if (data.volumeKg > 0) {
-    y += 38;
+    y += 36;
     ctx.fillStyle = '#8e8e93';
-    ctx.font = '700 38px system-ui';
+    ctx.font = '700 34px system-ui';
     ctx.fillText(volumeEquiv(data.volumeKg), center, y);
   }
 
   // Seções com título (estilo wrapped)
   const section = (title, content, contentColor, sub) => {
-    y += 80;
+    y += 74;
     ctx.fillStyle = '#6b6b72';
-    ctx.font = '700 30px system-ui';
+    ctx.font = '700 27px system-ui';
     ctx.fillText(title, center, y);
-    y += 58;
+    y += 53;
     ctx.fillStyle = contentColor || '#fff';
-    ctx.font = '800 52px system-ui';
+    ctx.font = '800 47px system-ui';
     ctx.fillText(content, center, y);
     if (sub) {
-      y += 48;
+      y += 44;
       ctx.fillStyle = '#8e8e93';
-      ctx.font = '700 38px system-ui';
+      ctx.font = '700 34px system-ui';
       ctx.fillText(sub, center, y);
     }
   };
