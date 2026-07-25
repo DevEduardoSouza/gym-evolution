@@ -22,9 +22,6 @@ app.use(session({
   },
 }));
 
-// Arquivos públicos (CSS para login, favicon)
-app.use('/style.css', express.static(path.join(__dirname, 'public', 'style.css')));
-app.use('/favicon.svg', express.static(path.join(__dirname, 'public', 'favicon.svg')));
 app.get('/favicon.ico', (req, res) => res.redirect(301, '/favicon.svg'));
 
 // Rotas públicas (login e cadastro)
@@ -82,6 +79,10 @@ app.post('/api/logout', (req, res) => {
   });
 });
 
+// Assets estáticos são públicos (necessário para o service worker/manifest do PWA);
+// os dados continuam protegidos nas APIs e o index atrás do requireAuth.
+app.use(express.static(path.join(__dirname, 'public'), { index: false }));
+
 // Middleware de autenticação
 function requireAuth(req, res, next) {
   if (req.session && req.session.userId) {
@@ -96,7 +97,9 @@ function requireAuth(req, res, next) {
 // Proteger tudo abaixo
 app.use(requireAuth);
 
-app.use(express.static(path.join(__dirname, 'public')));
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 // Usuário logado
 app.get('/api/me', (req, res) => {
