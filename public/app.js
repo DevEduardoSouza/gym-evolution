@@ -1781,10 +1781,7 @@ function renderDay() {
       <div class="ex-thumb" title="Ver evolução de carga">${thumb}</div>
       <div class="ex-info" title="Ver evolução de carga">
         <span class="ex-name">${esc(p.name)}</span>
-        <span class="ex-meta">
-          <span class="ex-chip ${muscleClass(p.muscle)}">${esc(p.muscle)}</span>
-          ${p.scheme ? `<span class="ex-scheme-txt">${esc(p.scheme)}</span>` : ''}
-        </span>
+        <span class="ex-chip ${muscleClass(p.muscle)}">${esc(p.muscle)}</span>
       </div>
       <div class="ex-fields">
         <button class="ex-field ex-last" type="button" title="Ver evolução e registrar séries">
