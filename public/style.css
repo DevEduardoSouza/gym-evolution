@@ -4016,3 +4016,20 @@ body.anim-flip .ex-anim2 .f2 { opacity: 1; }
 }
 .ex-last-val small { color: var(--faint); font-weight: 600; font-size: 0.68rem; margin-left: 4px; }
 .ex-last:hover .ex-last-val { text-decoration: underline; text-underline-offset: 3px; }
+
+/* iOS: remove o zoom do duplo-toque nos elementos interativos
+   (pan e pinca continuam funcionando) */
+button, a, input, select, textarea, label, canvas,
+.cal-day, .heatmap-cell, .week-day, .ex-check, .hj-check,
+.ex-card, .lib-card, .photo-item, .med-attr, .nav-btn,
+.muscle-chip, .evoc-chip, .activity-btn, .sidebar-user {
+  touch-action: manipulation;
+}
+
+/* iOS: campos com fonte < 16px causam zoom automatico ao focar */
+@media (pointer: coarse) {
+  input[type=text], input[type=number], input[type=date], input[type=time],
+  input[type=search], input[type=password], select, textarea {
+    font-size: 16px !important;
+  }
+}
