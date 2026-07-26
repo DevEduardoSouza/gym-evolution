@@ -1,7 +1,7 @@
 const express = require('express');
 const session = require('express-session');
 const path = require('path');
-const { db, ensureUserRows } = require('./database');
+const { db, ensureUserRows, normalizeFoodName } = require('./database');
 const { hashPassword, verifyPassword } = require('./auth');
 
 const app = express();
@@ -992,6 +992,268 @@ app.post('/api/users/:username/follow', (req, res) => {
     notify(u.id, 'follow', `f:${myName}`, '🫡', `${myName} começou a seguir você`, 'Agora seus recordes têm plateia. Bora treinar!', me);
   }
   res.json({ isFollowing: !existing, ...followCounts(u.id) });
+});
+
+// ======== DIETA ========
+
+const MEALS = ['cafe', 'almoco', 'lanche', 'janta'];
+
+function getDietConfig(userId) {
+  const row = db.prepare('SELECT * FROM diet_config WHERE user_id = ?').get(userId) || {};
+  const kcal = row.kcal_goal || 2500;
+  const p = row.protein_pct != null ? row.protein_pct : 30;
+  const c = row.carb_pct != null ? row.carb_pct : 40;
+  const f = row.fat_pct != null ? row.fat_pct : 30;
+  return {
+    kcal_goal: kcal,
+    protein_pct: p,
+    carb_pct: c,
+    fat_pct: f,
+    protein_goal: Math.round((kcal * p / 100) / 4),
+    carb_goal: Math.round((kcal * c / 100) / 4),
+    fat_goal: Math.round((kcal * f / 100) / 9),
+  };
+}
+
+app.get('/api/diet-config', (req, res) => {
+  res.json(getDietConfig(req.session.userId));
+});
+
+app.put('/api/diet-config', (req, res) => {
+  const uid = req.session.userId;
+  const kcal = Math.max(500, Math.min(10000, Math.round(+req.body.kcal_goal) || 2500));
+  let p = Math.max(0, +req.body.protein_pct || 0);
+  let c = Math.max(0, +req.body.carb_pct || 0);
+  let f = Math.max(0, +req.body.fat_pct || 0);
+  if (p + c + f <= 0) { p = 30; c = 40; f = 30; }
+  const sum = p + c + f;
+  p = Math.round((p / sum) * 100);
+  c = Math.round((c / sum) * 100);
+  f = 100 - p - c;
+  db.prepare('INSERT OR IGNORE INTO diet_config (user_id) VALUES (?)').run(uid);
+  db.prepare('UPDATE diet_config SET kcal_goal = ?, protein_pct = ?, carb_pct = ?, fat_pct = ?, protein_goal = ? WHERE user_id = ?')
+    .run(kcal, p, c, f, Math.round((kcal * p / 100) / 4), uid);
+  res.json(getDietConfig(uid));
+});
+
+// Busca na biblioteca de alimentos (TACO global + alimentos do usuário)
+app.get('/api/foods', (req, res) => {
+  const uid = req.session.userId;
+  const q = normalizeFoodName(String(req.query.q || '').trim());
+  if (!q) {
+    // Sem busca: alimentos do usuário + mais usados por ele
+    const recent = db.prepare(`
+      SELECT f.id, f.name, f.category, f.kcal, f.protein_g, f.carb_g, f.fat_g, f.user_id, COUNT(m.id) AS uses
+      FROM food_library f
+      LEFT JOIN meal_log m ON m.food_id = f.id AND m.user_id = ?
+      WHERE f.user_id = ? OR m.id IS NOT NULL
+      GROUP BY f.id ORDER BY uses DESC, f.name LIMIT 20
+    `).all(uid, uid);
+    return res.json(recent);
+  }
+  const words = q.split(/\s+/).filter(Boolean).slice(0, 5);
+  const where = words.map(() => 'f.name_norm LIKE ?').join(' AND ');
+  const params = words.map(w => `%${w}%`);
+  const rows = db.prepare(`
+    SELECT f.id, f.name, f.category, f.kcal, f.protein_g, f.carb_g, f.fat_g, f.user_id
+    FROM food_library f
+    WHERE (f.user_id IS NULL OR f.user_id = ?) AND ${where}
+    ORDER BY (f.user_id IS NULL), length(f.name) LIMIT 30
+  `).all(uid, ...params);
+  res.json(rows);
+});
+
+// Alimento personalizado do usuário (valores por 100 g)
+app.post('/api/foods', (req, res) => {
+  const uid = req.session.userId;
+  const name = String(req.body.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Nome do alimento é obrigatório' });
+  const num = v => Math.max(0, +v || 0);
+  const result = db.prepare(
+    'INSERT INTO food_library (user_id, name, name_norm, category, kcal, protein_g, carb_g, fat_g, fiber_g) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(uid, name, normalizeFoodName(name), 'Meus alimentos',
+    num(req.body.kcal), num(req.body.protein_g), num(req.body.carb_g), num(req.body.fat_g), num(req.body.fiber_g));
+  res.status(201).json(db.prepare('SELECT * FROM food_library WHERE id = ?').get(result.lastInsertRowid));
+});
+
+// Refeições de um dia, com macros calculados
+app.get('/api/meals', (req, res) => {
+  const uid = req.session.userId;
+  const date = String(req.query.date || new Date().toLocaleDateString('en-CA'));
+  const entries = db.prepare(`
+    SELECT m.id, m.meal, m.grams, f.id AS food_id, f.name,
+           ROUND(f.kcal * m.grams / 100, 1) AS kcal,
+           ROUND(f.protein_g * m.grams / 100, 1) AS protein_g,
+           ROUND(f.carb_g * m.grams / 100, 1) AS carb_g,
+           ROUND(f.fat_g * m.grams / 100, 1) AS fat_g
+    FROM meal_log m JOIN food_library f ON f.id = m.food_id
+    WHERE m.user_id = ? AND m.date = ?
+    ORDER BY m.id
+  `).all(uid, date);
+  const totals = { kcal: 0, protein_g: 0, carb_g: 0, fat_g: 0 };
+  entries.forEach(e => {
+    totals.kcal += e.kcal;
+    totals.protein_g += e.protein_g;
+    totals.carb_g += e.carb_g;
+    totals.fat_g += e.fat_g;
+  });
+  Object.keys(totals).forEach(k => { totals[k] = Math.round(totals[k] * 10) / 10; });
+  res.json({ date, entries, totals, config: getDietConfig(uid) });
+});
+
+app.post('/api/meals', (req, res) => {
+  const uid = req.session.userId;
+  const date = String(req.body.date || '').trim() || new Date().toLocaleDateString('en-CA');
+  const meal = MEALS.includes(req.body.meal) ? req.body.meal : 'almoco';
+  const grams = +req.body.grams;
+  const foodId = +req.body.food_id;
+  if (!(grams > 0)) return res.status(400).json({ error: 'Quantidade em gramas inválida' });
+  const food = db.prepare('SELECT id FROM food_library WHERE id = ? AND (user_id IS NULL OR user_id = ?)').get(foodId, uid);
+  if (!food) return res.status(404).json({ error: 'Alimento não encontrado' });
+  db.prepare('INSERT INTO meal_log (user_id, date, meal, food_id, grams) VALUES (?, ?, ?, ?, ?)')
+    .run(uid, date, meal, foodId, grams);
+  res.status(201).json({ success: true });
+});
+
+app.delete('/api/meals/:id', (req, res) => {
+  db.prepare('DELETE FROM meal_log WHERE id = ? AND user_id = ?').run(+req.params.id, req.session.userId);
+  res.json({ success: true });
+});
+
+// Busca online de produtos industrializados (Open Food Facts, gratuito)
+app.get('/api/foods/online', async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (!q) return res.json([]);
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    const url = 'https://search.openfoodfacts.org/search?page_size=20'
+      + '&fields=code,product_name,brands,nutriments&q=' + encodeURIComponent(q);
+    const r = await fetch(url, {
+      headers: { 'User-Agent': 'GymEvolution/1.0 (gym.genustech.com.br)' },
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    const data = await r.json();
+    const round1 = v => Math.round((+v || 0) * 10) / 10;
+    const items = (data.hits || data.products || []).map(p => {
+      const n = p.nutriments || {};
+      let kcal = +n['energy-kcal_100g'];
+      if (!kcal && n.energy_100g) kcal = +n.energy_100g / 4.184; // kJ -> kcal
+      const brands = Array.isArray(p.brands) ? p.brands : String(p.brands || '').split(',');
+      const brand = String(brands[0] || '').trim();
+      // Remove repetições de marca no nome ("X - Parmalat - Parmalat - ...")
+      const pname = String(p.product_name || '').trim()
+        .split(/\s+[-–—]\s+/)
+        .filter((part, i, arr) => arr.findIndex(x => x.toLowerCase() === part.toLowerCase()) === i)
+        .join(' - ')
+        .slice(0, 80);
+      const name = pname.toLowerCase().includes(brand.toLowerCase())
+        ? pname
+        : [pname, brand].filter(Boolean).join(' — ');
+      return {
+        name,
+        kcal: round1(kcal),
+        protein_g: round1(n.proteins_100g),
+        carb_g: round1(n.carbohydrates_100g),
+        fat_g: round1(n.fat_100g),
+        fiber_g: round1(n.fiber_100g),
+      };
+    }).filter(p => p.name && p.kcal > 0).slice(0, 15);
+    res.json(items);
+  } catch {
+    res.status(502).json({ error: 'Busca online indisponível no momento' });
+  }
+});
+
+// Relatório da dieta: semana (7 dias a partir de `start`) ou um dia só (`days=1`)
+app.get('/api/diet-report', (req, res) => {
+  const uid = req.session.userId;
+  const nDays = +req.query.days === 1 ? 1 : 7;
+  let start = String(req.query.start || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) {
+    const now = new Date();
+    if (nDays === 1) {
+      start = now.toLocaleDateString('en-CA');
+    } else {
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+      start = monday.toLocaleDateString('en-CA');
+    }
+  }
+  const startDate = new Date(start + 'T12:00:00');
+  const dates = [];
+  for (let i = 0; i < nDays; i++) {
+    const d = new Date(startDate);
+    d.setDate(startDate.getDate() + i);
+    dates.push(d.toLocaleDateString('en-CA'));
+  }
+  const end = dates[dates.length - 1];
+
+  const rows = db.prepare(`
+    SELECT m.date, m.meal, m.grams, f.name, f.kcal, f.protein_g, f.carb_g, f.fat_g
+    FROM meal_log m JOIN food_library f ON f.id = m.food_id
+    WHERE m.user_id = ? AND m.date >= ? AND m.date <= ?
+  `).all(uid, start, end);
+
+  const round1 = v => Math.round(v * 10) / 10;
+  const days = dates.map(date => ({
+    date, kcal: 0, protein_g: 0, carb_g: 0, fat_g: 0,
+    meals: { cafe: 0, almoco: 0, lanche: 0, janta: 0 },
+  }));
+  const byDate = Object.fromEntries(days.map(d => [d.date, d]));
+  const foodsMap = {};
+
+  rows.forEach(r => {
+    const f = r.grams / 100;
+    const d = byDate[r.date];
+    if (!d) return;
+    d.kcal += r.kcal * f;
+    d.protein_g += r.protein_g * f;
+    d.carb_g += r.carb_g * f;
+    d.fat_g += r.fat_g * f;
+    d.meals[r.meal] = (d.meals[r.meal] || 0) + r.kcal * f;
+    const fm = foodsMap[r.name] = foodsMap[r.name] || { name: r.name, count: 0, kcal: 0 };
+    fm.count++;
+    fm.kcal += r.kcal * f;
+  });
+
+  const totals = { kcal: 0, protein_g: 0, carb_g: 0, fat_g: 0 };
+  const byMeal = { cafe: 0, almoco: 0, lanche: 0, janta: 0 };
+  days.forEach(d => {
+    totals.kcal += d.kcal;
+    totals.protein_g += d.protein_g;
+    totals.carb_g += d.carb_g;
+    totals.fat_g += d.fat_g;
+    Object.keys(byMeal).forEach(m => { byMeal[m] += d.meals[m]; });
+    d.kcal = Math.round(d.kcal);
+    d.protein_g = round1(d.protein_g);
+    d.carb_g = round1(d.carb_g);
+    d.fat_g = round1(d.fat_g);
+    Object.keys(d.meals).forEach(m => { d.meals[m] = Math.round(d.meals[m]); });
+  });
+  Object.keys(byMeal).forEach(m => { byMeal[m] = Math.round(byMeal[m]); });
+  const daysLogged = days.filter(d => d.kcal > 0).length;
+
+  const foods = Object.values(foodsMap)
+    .map(f => ({ ...f, kcal: Math.round(f.kcal) }))
+    .sort((a, b) => b.kcal - a.kcal)
+    .slice(0, 12);
+
+  res.json({
+    start, end, days,
+    totals: {
+      kcal: Math.round(totals.kcal),
+      protein_g: round1(totals.protein_g),
+      carb_g: round1(totals.carb_g),
+      fat_g: round1(totals.fat_g),
+    },
+    byMeal,
+    foods,
+    daysLogged,
+    avgKcal: daysLogged ? Math.round(totals.kcal / daysLogged) : 0,
+    config: getDietConfig(uid),
+  });
 });
 
 // Retrospectiva dos últimos 30 dias (estilo wrapped)

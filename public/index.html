@@ -38,6 +38,9 @@
         <button class="nav-btn" data-tab="agua">
           <span class="nav-icon" data-icon="drop"></span><span class="nav-label">Água</span>
         </button>
+        <button class="nav-btn" data-tab="dieta">
+          <span class="nav-icon" data-icon="apple"></span><span class="nav-label">Dieta</span>
+        </button>
         <button class="nav-btn" data-tab="treino">
           <span class="nav-icon" data-icon="calendar"></span><span class="nav-label">Frequência</span>
         </button>
@@ -274,6 +277,54 @@
         </div>
       </div>
       <div id="heatmap-tooltip" class="heatmap-tooltip"></div>
+    </div>
+
+    <div id="tab-dieta" class="tab-panel">
+      <div class="diet-summary">
+        <div class="diet-summary-head">
+          <div>
+            <span class="diet-kcal-big"><span id="diet-kcal-atual">0</span> <small>/ <span id="diet-kcal-meta">0</span> kcal</small></span>
+            <p class="diet-kcal-sub" id="diet-kcal-sub"></p>
+          </div>
+          <button id="btn-diet-config" class="btn-secondary btn-sm"><span data-icon="settings"></span> Metas</button>
+        </div>
+        <div class="diet-bar"><div class="diet-bar-fill" id="diet-kcal-fill"></div></div>
+        <div class="diet-macros">
+          <div class="diet-macro"><b id="diet-prot">0 g</b><span>Proteína <small id="diet-prot-meta"></small></span></div>
+          <div class="diet-macro"><b id="diet-carb">0 g</b><span>Carboidrato <small id="diet-carb-meta"></small></span></div>
+          <div class="diet-macro"><b id="diet-fat">0 g</b><span>Gordura <small id="diet-fat-meta"></small></span></div>
+        </div>
+      </div>
+      <div class="diet-meals" id="diet-meals"></div>
+
+      <div class="diet-report">
+        <div class="diet-report-head">
+          <div class="rep-mode">
+            <button type="button" class="rep-mode-btn" data-repmode="dia">Hoje</button>
+            <button type="button" class="rep-mode-btn active" data-repmode="semana">Semana</button>
+          </div>
+          <div class="week-nav">
+            <button type="button" id="week-prev" class="btn-secondary btn-sm" title="Semana anterior">‹</button>
+            <span id="week-label">Essa semana</span>
+            <button type="button" id="week-next" class="btn-secondary btn-sm" title="Próxima semana">›</button>
+          </div>
+        </div>
+        <div class="report-hero">
+          <div class="report-stat"><b id="rep-total">0</b><span id="rep-total-lbl">kcal na semana</span></div>
+          <div class="report-stat"><b id="rep-avg">0</b><span id="rep-avg-lbl">média por dia</span></div>
+          <div class="report-stat"><b id="rep-prot">0 g</b><span>proteína</span></div>
+          <div class="report-stat"><b id="rep-carb">0 g</b><span>carboidrato</span></div>
+          <div class="report-stat"><b id="rep-fat">0 g</b><span>gordura</span></div>
+        </div>
+        <div class="diet-chart-wrap">
+          <div class="diet-chart" id="diet-chart"></div>
+        </div>
+        <p class="diet-chart-caption" id="diet-chart-caption"></p>
+        <div class="diet-legend" id="diet-legend"></div>
+        <div class="report-macros" id="rep-macros"></div>
+        <h4 class="report-sub" id="rep-foods-title">Alimentos da semana</h4>
+        <div class="rep-foods" id="rep-foods"></div>
+      </div>
     </div>
 
     <div id="tab-treino" class="tab-panel">
@@ -519,6 +570,92 @@
         <button type="button" id="btn-custom-exercise" class="btn-secondary"><span data-icon="plus"></span> Criar exercício</button>
         <button type="button" id="btn-library-close" class="btn-primary">Fechar</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Adicionar alimento -->
+  <div id="modal-food" class="modal-overlay hidden">
+    <div class="modal">
+      <h2 id="food-modal-title">Adicionar alimento</h2>
+
+      <div id="food-step-search">
+        <input type="search" id="food-search" class="library-search" placeholder="Buscar alimento (ex: arroz, frango...)" autocomplete="off">
+        <div id="food-results" class="food-results"></div>
+        <button type="button" id="btn-food-online" class="btn-secondary food-online-btn" style="display:none">🌐 Buscar online (produtos e marcas)</button>
+        <div class="form-actions">
+          <button type="button" id="btn-food-custom" class="btn-secondary"><span data-icon="plus"></span> Criar alimento</button>
+          <button type="button" id="btn-food-close" class="btn-secondary">Fechar</button>
+        </div>
+      </div>
+
+      <div id="food-step-qty" style="display:none">
+        <p class="food-sel-name" id="food-sel-name"></p>
+        <p class="food-sel-per100" id="food-sel-per100"></p>
+        <div class="form-group">
+          <label for="food-grams">Quantidade (g)</label>
+          <input type="number" id="food-grams" min="1" step="1" value="100" inputmode="numeric">
+        </div>
+        <p class="food-preview" id="food-preview"></p>
+        <div class="form-actions">
+          <button type="button" id="btn-food-back" class="btn-secondary">Voltar</button>
+          <button type="button" id="btn-food-add" class="btn-primary">Adicionar</button>
+        </div>
+      </div>
+
+      <form id="food-step-custom" style="display:none">
+        <p class="food-sel-per100">Valores por 100 g do alimento</p>
+        <div class="form-group">
+          <label for="cf-name">Nome</label>
+          <input type="text" id="cf-name" required placeholder="Ex: Whey protein XYZ">
+        </div>
+        <div class="cf-grid">
+          <div class="form-group"><label for="cf-kcal">Calorias (kcal)</label><input type="number" id="cf-kcal" min="0" step="0.1" required></div>
+          <div class="form-group"><label for="cf-prot">Proteína (g)</label><input type="number" id="cf-prot" min="0" step="0.1" value="0"></div>
+          <div class="form-group"><label for="cf-carb">Carboidrato (g)</label><input type="number" id="cf-carb" min="0" step="0.1" value="0"></div>
+          <div class="form-group"><label for="cf-fat">Gordura (g)</label><input type="number" id="cf-fat" min="0" step="0.1" value="0"></div>
+        </div>
+        <div class="form-actions">
+          <button type="button" id="btn-cf-back" class="btn-secondary">Voltar</button>
+          <button type="submit" class="btn-primary">Salvar alimento</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Metas da dieta -->
+  <div id="modal-diet-config" class="modal-overlay hidden">
+    <div class="modal">
+      <h2>Metas da dieta</h2>
+      <form id="diet-config-form">
+        <p class="dc-section">Meta de calorias</p>
+        <div class="dc-row">
+          <div class="dc-info"><b>Calorias</b><span id="dc-idr-note">meta diária de energia</span></div>
+          <div class="dc-input"><input type="number" id="dc-kcal" min="500" max="10000" step="10" required><span class="dc-unit">kcal</span></div>
+        </div>
+        <button type="button" id="btn-dc-idr" class="dc-link">Calcular meu gasto diário (IDR)</button>
+
+        <p class="dc-section">Metas de macronutrientes</p>
+        <div class="dc-row">
+          <div class="dc-info"><b>Carboidratos</b><span id="dc-carb-sub"></span></div>
+          <div class="dc-input"><input type="number" id="dc-carb" min="0" step="1" required><span class="dc-unit" data-dc-unit>%</span></div>
+        </div>
+        <div class="dc-row">
+          <div class="dc-info"><b>Proteínas</b><span id="dc-prot-sub"></span></div>
+          <div class="dc-input"><input type="number" id="dc-prot" min="0" step="1" required><span class="dc-unit" data-dc-unit>%</span></div>
+        </div>
+        <div class="dc-row">
+          <div class="dc-info"><b>Gorduras</b><span id="dc-fat-sub"></span></div>
+          <div class="dc-input"><input type="number" id="dc-fat" min="0" step="1" required><span class="dc-unit" data-dc-unit>%</span></div>
+        </div>
+        <div class="dc-foot">
+          <span class="dc-sum" id="dc-sum"></span>
+          <button type="button" id="btn-dc-unit" class="dc-link">Usar gramas</button>
+        </div>
+        <div class="form-actions">
+          <button type="button" id="btn-dc-cancel" class="btn-secondary">Cancelar</button>
+          <button type="submit" class="btn-primary">Salvar</button>
+        </div>
+      </form>
     </div>
   </div>
 

@@ -1092,6 +1092,7 @@ const TAB_TITLES = {
   hoje: 'Hoje',
   medicoes: 'Corpo',
   agua: 'Água',
+  dieta: 'Dieta',
   treino: 'Frequência',
   ciclo: 'Treino',
   avisos: 'Notificações',
@@ -1101,6 +1102,7 @@ const TAB_TITLES = {
 const TAB_ACTIONS = {
   medicoes: ['btn-export-prompt', 'btn-new'],
   agua: [],
+  dieta: [],
   treino: [],
   ciclo: [],
 };
@@ -1132,6 +1134,7 @@ document.querySelectorAll('.nav-btn[data-tab]').forEach(btn => {
     if (tab === 'hoje') loadHojeData();
     if (tab === 'medicoes') loadPhotos();
     if (tab === 'agua') loadWaterData();
+    if (tab === 'dieta') loadDietaData();
     if (tab === 'treino') loadTreinoData();
     if (tab === 'ciclo') loadCicloData();
     if (tab === 'avisos') loadNotifs();
@@ -1445,6 +1448,7 @@ const ICONS = {
   calendar: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
   home: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h5v-6h4v6h5V9.5"/></svg>',
   bell: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>',
+  apple: '<svg class="icon-svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 7c-1-2.5-3.2-3-4.8-2.4C4.6 5.6 3 8.3 3.5 12c.5 4 3 8 5.5 8 1.2 0 1.6-.6 3-.6s1.8.6 3 .6c2.5 0 5-4 5.5-8 .5-3.7-1.1-6.4-3.7-7.4C15.2 4 13 4.5 12 7z"/><path d="M12 6.5c0-2 1.5-3.8 3.5-4-.1 2.2-1.6 3.8-3.5 4z"/></svg>',
 };
 const ICON_DUMBBELL = ICONS.dumbbell;
 const ICON_RUN = ICONS.run;
@@ -3396,6 +3400,556 @@ document.getElementById('btn-wrapped-download').addEventListener('click', async 
   a.download = wrappedVariant === 'hoje' ? 'treino-de-hoje-gym.png' : 'retrospectiva-gym.png';
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+});
+
+// ======== DIETA ========
+const MEAL_META = {
+  cafe: { icon: '☕', label: 'Café da manhã' },
+  almoco: { icon: '🍛', label: 'Almoço' },
+  lanche: { icon: '🥪', label: 'Lanche' },
+  janta: { icon: '🍽️', label: 'Jantar' },
+};
+const MEAL_COLORS = { cafe: '#a37f00', almoco: '#2f7fd6', lanche: '#d05a3d', janta: '#9b59d0' };
+let dietDay = null;
+let foodModalMeal = 'almoco';
+let foodSelected = null;
+let dietRepMode = 'semana'; // 'dia' | 'semana'
+let dietRepOffset = 0;      // deslocamento em dias ou semanas, conforme o modo
+
+async function loadDietaData() {
+  const [day] = await Promise.all([
+    api('GET', `/api/meals?date=${todayStr()}`),
+    loadDietReport(),
+  ]);
+  dietDay = day;
+  renderDieta();
+}
+
+function dietMondayStr(offsetWeeks) {
+  const now = new Date();
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - ((now.getDay() + 6) % 7) + offsetWeeks * 7);
+  return monday.toLocaleDateString('en-CA');
+}
+
+function dietDateOffsetStr(offsetDays) {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  return d.toLocaleDateString('en-CA');
+}
+
+async function loadDietReport() {
+  const q = dietRepMode === 'dia'
+    ? `start=${dietDateOffsetStr(dietRepOffset)}&days=1`
+    : `start=${dietMondayStr(dietRepOffset)}`;
+  const rep = await api('GET', `/api/diet-report?${q}`);
+  renderDietReport(rep);
+}
+
+function renderDietReport(rep) {
+  const fmtBR = n => Number(n).toLocaleString('pt-BR');
+  const dm = s => `${s.slice(8, 10)}/${s.slice(5, 7)}`;
+
+  const isDia = dietRepMode === 'dia';
+  document.getElementById('week-label').textContent = isDia
+    ? (dietRepOffset === 0 ? 'Hoje' : dietRepOffset === -1 ? 'Ontem' : formatDate(rep.start))
+    : (dietRepOffset === 0 ? 'Essa semana' : `${dm(rep.start)} – ${dm(rep.end)}`);
+  document.getElementById('week-next').disabled = dietRepOffset >= 0;
+
+  document.getElementById('rep-total').textContent = fmtBR(rep.totals.kcal);
+  document.getElementById('rep-total-lbl').textContent = isDia ? 'kcal no dia' : 'kcal na semana';
+  document.getElementById('rep-avg').textContent = isDia ? fmtBR(rep.config.kcal_goal) : fmtBR(rep.avgKcal);
+  document.getElementById('rep-avg-lbl').textContent = isDia ? 'meta do dia' : 'média por dia';
+  document.getElementById('rep-prot').textContent = fmtBR(Math.round(rep.totals.protein_g)) + ' g';
+  document.getElementById('rep-carb').textContent = fmtBR(Math.round(rep.totals.carb_g)) + ' g';
+  document.getElementById('rep-fat').textContent = fmtBR(Math.round(rep.totals.fat_g)) + ' g';
+  document.getElementById('rep-foods-title').textContent = isDia ? 'Alimentos do dia' : 'Alimentos da semana';
+
+  // Gráfico: barras empilhadas por refeição, linha tracejada = meta diária.
+  // Tudo em px na mesma escala (PLOT_H) para barras e linha de meta ficarem alinhadas.
+  // Se a meta está muito acima do consumo, ela sai da escala (senão as barras encolhem)
+  // e vira uma nota no canto do gráfico.
+  const meta = rep.config.kcal_goal || 0;
+  const dataMax = Math.max(...rep.days.map(d => d.kcal), 1);
+  const showMetaLine = meta > 0 && meta <= dataMax * 1.35;
+  const scale = (showMetaLine ? Math.max(dataMax, meta) : dataMax) * 1.06;
+  const PLOT_H = 170; // px úteis para as barras
+  const LBL_H = 22;   // px da faixa de rótulos dos dias
+  const WD = ['S', 'T', 'Q', 'Q', 'S', 'S', 'D'];
+  const hoje = todayStr();
+  const chart = document.getElementById('diet-chart');
+  chart.innerHTML = '';
+  const caption = document.getElementById('diet-chart-caption');
+  caption.textContent = '';
+  let selectedCol = null;
+
+  if (showMetaLine) {
+    const line = document.createElement('div');
+    line.className = 'diet-meta-line';
+    line.style.bottom = `${LBL_H + (meta / scale) * PLOT_H}px`;
+    line.innerHTML = `<em>meta ${fmtBR(meta)}</em>`;
+    chart.appendChild(line);
+  } else if (meta > 0) {
+    const note = document.createElement('span');
+    note.className = 'diet-meta-note';
+    note.textContent = `meta ${fmtBR(meta)} kcal/dia`;
+    chart.appendChild(note);
+  }
+
+  rep.days.forEach(d => {
+    const wd = (new Date(d.date + 'T12:00:00').getDay() + 6) % 7;
+    const col = document.createElement('div');
+    col.className = 'diet-col';
+
+    const val = document.createElement('span');
+    val.className = 'diet-col-val';
+    val.textContent = d.kcal > 0 ? fmtBR(d.kcal) : '';
+
+    const bar = document.createElement('div');
+    bar.className = 'diet-bar-stack' + (d.kcal > 0 ? '' : ' empty');
+    bar.style.height = `${Math.max(3, (d.kcal / scale) * PLOT_H)}px`;
+    Object.keys(MEAL_META).forEach(m => {
+      const kcal = d.meals[m] || 0;
+      if (!kcal) return;
+      const seg = document.createElement('div');
+      seg.className = 'diet-seg';
+      seg.style.flexGrow = kcal;
+      seg.style.background = MEAL_COLORS[m];
+      bar.appendChild(seg);
+    });
+
+    const lbl = document.createElement('span');
+    lbl.className = 'diet-col-lbl' + (d.date === hoje ? ' today' : '');
+    lbl.textContent = `${WD[wd]} ${+d.date.slice(8, 10)}`;
+
+    col.appendChild(val);
+    col.appendChild(bar);
+    col.appendChild(lbl);
+
+    // Toque/clique no dia mostra o detalhamento por refeição (funciona no celular)
+    if (d.kcal > 0) {
+      col.addEventListener('click', () => {
+        if (selectedCol === col) {
+          selectedCol = null;
+          chart.querySelectorAll('.diet-col').forEach(c => c.classList.remove('sel', 'dim'));
+          caption.textContent = '';
+          return;
+        }
+        selectedCol = col;
+        chart.querySelectorAll('.diet-col').forEach(c => {
+          c.classList.toggle('sel', c === col);
+          c.classList.toggle('dim', c !== col);
+        });
+        const partes = Object.entries(MEAL_META)
+          .filter(([m]) => d.meals[m] > 0)
+          .map(([m, mm]) => `${mm.label} ${fmtBR(d.meals[m])}`);
+        caption.textContent = `${WEEKDAY_NAMES[wd]} ${formatDate(d.date)} · ${fmtBR(d.kcal)} kcal — ${partes.join(' · ')}`;
+      });
+    }
+    chart.appendChild(col);
+  });
+
+  // Legenda por refeição, com % e kcal (como o total da semana)
+  const totalMeals = Object.values(rep.byMeal).reduce((s, v) => s + v, 0);
+  const legend = document.getElementById('diet-legend');
+  legend.innerHTML = '';
+  Object.entries(MEAL_META).forEach(([key, meta2]) => {
+    const kcal = rep.byMeal[key] || 0;
+    const pct = totalMeals > 0 ? Math.round((kcal / totalMeals) * 100) : 0;
+    const row = document.createElement('div');
+    row.className = 'diet-legend-row';
+    row.innerHTML = `
+      <span class="dl-chip" style="background:${MEAL_COLORS[key]}"></span>
+      <span class="dl-name">${meta2.label}</span>
+      <span class="dl-pct">(${pct}%)</span>
+      <span class="dl-kcal">${fmtBR(kcal)}</span>
+    `;
+    legend.appendChild(row);
+  });
+
+  // Distribuição de macros (% das calorias)
+  const kcalP = rep.totals.protein_g * 4;
+  const kcalC = rep.totals.carb_g * 4;
+  const kcalF = rep.totals.fat_g * 9;
+  const kcalSum = kcalP + kcalC + kcalF;
+  const pctOf = v => kcalSum > 0 ? Math.round((v / kcalSum) * 100) : 0;
+  document.getElementById('rep-macros').innerHTML = kcalSum > 0 ? `
+    <div class="diet-macro"><b>${pctOf(kcalP)}%</b><span>Proteína<br><small>meta ${rep.config.protein_pct}%</small></span></div>
+    <div class="diet-macro"><b>${pctOf(kcalC)}%</b><span>Carboidrato<br><small>meta ${rep.config.carb_pct}%</small></span></div>
+    <div class="diet-macro"><b>${pctOf(kcalF)}%</b><span>Gordura<br><small>meta ${rep.config.fat_pct}%</small></span></div>
+  ` : '';
+
+  // Ranking de alimentos da semana
+  const foodsEl = document.getElementById('rep-foods');
+  foodsEl.innerHTML = '';
+  if (!rep.foods.length) {
+    foodsEl.innerHTML = '<p class="diet-empty">Nenhum alimento registrado nessa semana.</p>';
+  } else {
+    rep.foods.forEach(f => {
+      const row = document.createElement('div');
+      row.className = 'rep-food-row';
+      row.innerHTML = `
+        <span class="rf-name">${esc(f.name)}</span>
+        <span class="rf-count">x${f.count} =</span>
+        <span class="rf-kcal">${fmtBR(f.kcal)}</span>
+      `;
+      foodsEl.appendChild(row);
+    });
+    const total = document.createElement('div');
+    total.className = 'rep-food-row rep-food-total';
+    total.innerHTML = `
+      <span class="rf-name">Total da semana</span>
+      <span class="rf-count"></span>
+      <span class="rf-kcal">${fmtBR(rep.totals.kcal)}</span>
+    `;
+    foodsEl.appendChild(total);
+  }
+}
+
+document.getElementById('week-prev').addEventListener('click', () => {
+  dietRepOffset--;
+  loadDietReport();
+});
+document.getElementById('week-next').addEventListener('click', () => {
+  if (dietRepOffset < 0) {
+    dietRepOffset++;
+    loadDietReport();
+  }
+});
+document.querySelectorAll('.rep-mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (dietRepMode === btn.dataset.repmode) return;
+    dietRepMode = btn.dataset.repmode;
+    dietRepOffset = 0;
+    document.querySelectorAll('.rep-mode-btn').forEach(b => b.classList.toggle('active', b === btn));
+    loadDietReport();
+  });
+});
+
+function renderDieta() {
+  const d = dietDay;
+  if (!d) return;
+  const fmt1 = v => String(+(+v).toFixed(1)).replace('.', ',');
+
+  // Resumo do dia
+  countUp(document.getElementById('diet-kcal-atual'), Math.round(d.totals.kcal));
+  document.getElementById('diet-kcal-meta').textContent = d.config.kcal_goal;
+  const pct = d.config.kcal_goal > 0 ? (d.totals.kcal / d.config.kcal_goal) * 100 : 0;
+  const fill = document.getElementById('diet-kcal-fill');
+  fill.style.width = Math.min(100, pct) + '%';
+  fill.classList.toggle('over', pct > 100);
+  const restante = d.config.kcal_goal - d.totals.kcal;
+  document.getElementById('diet-kcal-sub').textContent = restante >= 0
+    ? `${Math.round(restante)} kcal restantes hoje`
+    : `${Math.round(-restante)} kcal acima da meta`;
+
+  document.getElementById('diet-prot').textContent = fmt1(d.totals.protein_g) + ' g';
+  document.getElementById('diet-prot-meta').textContent = d.config.protein_goal ? `/ ${d.config.protein_goal} g` : '';
+  document.getElementById('diet-prot').style.color = d.totals.protein_g >= d.config.protein_goal ? '#30d158' : '';
+  document.getElementById('diet-carb').textContent = fmt1(d.totals.carb_g) + ' g';
+  document.getElementById('diet-carb-meta').textContent = d.config.carb_goal ? `/ ${d.config.carb_goal} g` : '';
+  document.getElementById('diet-fat').textContent = fmt1(d.totals.fat_g) + ' g';
+  document.getElementById('diet-fat-meta').textContent = d.config.fat_goal ? `/ ${d.config.fat_goal} g` : '';
+
+  // Refeições
+  const wrap = document.getElementById('diet-meals');
+  wrap.innerHTML = '';
+  Object.entries(MEAL_META).forEach(([key, meta]) => {
+    const entries = d.entries.filter(e => e.meal === key);
+    const kcal = Math.round(entries.reduce((s, e) => s + e.kcal, 0));
+    const card = document.createElement('div');
+    card.className = 'diet-meal-card';
+    card.innerHTML = `
+      <div class="diet-meal-head">
+        <h3>${meta.icon} ${meta.label} <small>${kcal ? kcal + ' kcal' : ''}</small></h3>
+        <button class="btn-secondary btn-sm diet-add-btn"><span data-icon="plus"></span> Adicionar</button>
+      </div>
+      <div class="diet-entries"></div>
+    `;
+    const list = card.querySelector('.diet-entries');
+    if (!entries.length) {
+      list.innerHTML = '<p class="diet-empty">Nada registrado</p>';
+    }
+    entries.forEach(e => {
+      const row = document.createElement('div');
+      row.className = 'diet-entry';
+      row.innerHTML = `
+        <span class="de-name">${esc(e.name)}</span>
+        <span class="de-qty">${fmt1(e.grams)} g</span>
+        <span class="de-kcal">${Math.round(e.kcal)} kcal · P ${fmt1(e.protein_g)}</span>
+        <button class="de-del" title="Remover"><span data-icon="trash"></span></button>
+      `;
+      row.querySelector('.de-del').addEventListener('click', async () => {
+        await api('DELETE', `/api/meals/${e.id}`);
+        loadDietaData();
+      });
+      list.appendChild(row);
+    });
+    card.querySelector('.diet-add-btn').addEventListener('click', () => openFoodModal(key));
+    wrap.appendChild(card);
+  });
+  injectIcons(wrap);
+}
+
+// ---- Modal de alimento ----
+const modalFood = document.getElementById('modal-food');
+
+function foodModalStep(step) {
+  document.getElementById('food-step-search').style.display = step === 'search' ? '' : 'none';
+  document.getElementById('food-step-qty').style.display = step === 'qty' ? '' : 'none';
+  document.getElementById('food-step-custom').style.display = step === 'custom' ? '' : 'none';
+}
+
+function openFoodModal(meal) {
+  foodModalMeal = meal;
+  foodSelected = null;
+  document.getElementById('food-modal-title').textContent = `${MEAL_META[meal].icon} ${MEAL_META[meal].label}`;
+  document.getElementById('food-search').value = '';
+  foodModalStep('search');
+  searchFoods('');
+  modalFood.classList.remove('hidden');
+  setTimeout(() => document.getElementById('food-search').focus(), 50);
+}
+
+async function searchFoods(q) {
+  const results = await api('GET', `/api/foods?q=${encodeURIComponent(q)}`);
+  const box = document.getElementById('food-results');
+  const onlineBtn = document.getElementById('btn-food-online');
+  onlineBtn.style.display = q ? '' : 'none';
+  onlineBtn.disabled = false;
+  onlineBtn.textContent = '🌐 Buscar online (produtos e marcas)';
+  box.innerHTML = '';
+  if (!results.length) {
+    box.innerHTML = `<p class="diet-empty">${q ? 'Nada na tabela local. Tente a busca online abaixo ou crie um personalizado.' : 'Busque um alimento acima.'}</p>`;
+    return;
+  }
+  results.forEach(f => {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'food-result';
+    row.innerHTML = `
+      <span class="fr-name">${esc(f.name)}${f.user_id ? ' <small>· meu</small>' : ''}</span>
+      <span class="fr-macros">${Math.round(f.kcal)} kcal · P ${String(f.protein_g).replace('.', ',')} · C ${String(f.carb_g).replace('.', ',')} · G ${String(f.fat_g).replace('.', ',')} <small>/100g</small></span>
+    `;
+    row.addEventListener('click', () => {
+      goToQtyStep(f);
+      setTimeout(() => document.getElementById('food-grams').select(), 50);
+    });
+    box.appendChild(row);
+  });
+}
+
+function updateFoodPreview() {
+  if (!foodSelected) return;
+  const g = +document.getElementById('food-grams').value || 0;
+  const m = v => String(+((v * g) / 100).toFixed(1)).replace('.', ',');
+  document.getElementById('food-preview').textContent =
+    `= ${Math.round((foodSelected.kcal * g) / 100)} kcal · P ${m(foodSelected.protein_g)} g · C ${m(foodSelected.carb_g)} g · G ${m(foodSelected.fat_g)} g`;
+}
+
+let foodSearchTimer = null;
+document.getElementById('food-search').addEventListener('input', e => {
+  clearTimeout(foodSearchTimer);
+  foodSearchTimer = setTimeout(() => searchFoods(e.target.value.trim()), 250);
+});
+
+document.getElementById('food-grams').addEventListener('input', updateFoodPreview);
+document.getElementById('btn-food-back').addEventListener('click', () => foodModalStep('search'));
+document.getElementById('btn-food-close').addEventListener('click', () => modalFood.classList.add('hidden'));
+modalFood.addEventListener('click', e => { if (e.target === modalFood) modalFood.classList.add('hidden'); });
+
+document.getElementById('btn-food-add').addEventListener('click', async () => {
+  const grams = +document.getElementById('food-grams').value;
+  if (!foodSelected || !(grams > 0)) return;
+  await api('POST', '/api/meals', { date: todayStr(), meal: foodModalMeal, food_id: foodSelected.id, grams });
+  modalFood.classList.add('hidden');
+  toastMsg('Alimento registrado! 🍽️');
+  loadDietaData();
+});
+
+// Busca online (Open Food Facts) — salva o produto escolhido na biblioteca do usuário
+function goToQtyStep(food) {
+  foodSelected = food;
+  document.getElementById('food-sel-name').textContent = food.name;
+  document.getElementById('food-sel-per100').textContent =
+    `Por 100 g: ${Math.round(food.kcal)} kcal · P ${food.protein_g} g · C ${food.carb_g} g · G ${food.fat_g} g`;
+  document.getElementById('food-grams').value = 100;
+  updateFoodPreview();
+  foodModalStep('qty');
+}
+
+document.getElementById('btn-food-online').addEventListener('click', async e => {
+  const btn = e.currentTarget;
+  const q = document.getElementById('food-search').value.trim();
+  if (!q) return;
+  btn.disabled = true;
+  btn.textContent = '🌐 Buscando online…';
+  const results = await api('GET', `/api/foods/online?q=${encodeURIComponent(q)}`);
+  btn.disabled = false;
+  btn.textContent = '🌐 Buscar online (produtos e marcas)';
+  const box = document.getElementById('food-results');
+  if (!Array.isArray(results)) {
+    toastMsg(results.error || 'Busca online falhou. Tenta de novo!');
+    return;
+  }
+  box.innerHTML = '';
+  if (!results.length) {
+    box.innerHTML = '<p class="diet-empty">Nenhum produto encontrado online. Crie um personalizado com o rótulo!</p>';
+    return;
+  }
+  results.forEach(f => {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'food-result';
+    row.innerHTML = `
+      <span class="fr-name">${esc(f.name)} <small>· 🌐</small></span>
+      <span class="fr-macros">${Math.round(f.kcal)} kcal · P ${String(f.protein_g).replace('.', ',')} · C ${String(f.carb_g).replace('.', ',')} · G ${String(f.fat_g).replace('.', ',')} <small>/100g</small></span>
+    `;
+    row.addEventListener('click', async () => {
+      const saved = await api('POST', '/api/foods', f);
+      if (saved && saved.id) goToQtyStep(saved);
+    });
+    box.appendChild(row);
+  });
+});
+
+// Alimento personalizado
+document.getElementById('btn-food-custom').addEventListener('click', () => {
+  document.getElementById('cf-name').value = document.getElementById('food-search').value.trim();
+  foodModalStep('custom');
+});
+document.getElementById('btn-cf-back').addEventListener('click', () => foodModalStep('search'));
+document.getElementById('food-step-custom').addEventListener('submit', async e => {
+  e.preventDefault();
+  const food = await api('POST', '/api/foods', {
+    name: document.getElementById('cf-name').value.trim(),
+    kcal: +document.getElementById('cf-kcal').value || 0,
+    protein_g: +document.getElementById('cf-prot').value || 0,
+    carb_g: +document.getElementById('cf-carb').value || 0,
+    fat_g: +document.getElementById('cf-fat').value || 0,
+  });
+  if (food && food.id) goToQtyStep(food);
+});
+
+// ---- Metas da dieta (estilo FatSecret: % de macros com equivalente em gramas) ----
+const modalDietConfig = document.getElementById('modal-diet-config');
+let dcUnit = 'pct'; // 'pct' | 'g'
+
+function dcVals() {
+  return {
+    kcal: +document.getElementById('dc-kcal').value || 0,
+    carb: +document.getElementById('dc-carb').value || 0,
+    prot: +document.getElementById('dc-prot').value || 0,
+    fat: +document.getElementById('dc-fat').value || 0,
+  };
+}
+
+// Atualiza os equivalentes (g ou %) e a linha de total conforme os inputs
+function dcRefresh() {
+  const v = dcVals();
+  const sumEl = document.getElementById('dc-sum');
+  if (dcUnit === 'pct') {
+    const gOf = (pct, cal) => v.kcal > 0 ? Math.round((v.kcal * pct / 100) / cal) + ' g' : '— g';
+    document.getElementById('dc-carb-sub').textContent = gOf(v.carb, 4);
+    document.getElementById('dc-prot-sub').textContent = gOf(v.prot, 4);
+    document.getElementById('dc-fat-sub').textContent = gOf(v.fat, 9);
+    const sum = v.carb + v.prot + v.fat;
+    sumEl.textContent = `Total: ${sum}%`;
+    sumEl.classList.toggle('bad', sum !== 100);
+  } else {
+    const kc = { carb: v.carb * 4, prot: v.prot * 4, fat: v.fat * 9 };
+    const sumK = kc.carb + kc.prot + kc.fat;
+    const pctOf = k => (sumK > 0 ? Math.round((k / sumK) * 100) : 0) + '%';
+    document.getElementById('dc-carb-sub').textContent = pctOf(kc.carb);
+    document.getElementById('dc-prot-sub').textContent = pctOf(kc.prot);
+    document.getElementById('dc-fat-sub').textContent = pctOf(kc.fat);
+    sumEl.textContent = `Macros somam ${Math.round(sumK)} kcal`;
+    sumEl.classList.toggle('bad', v.kcal > 0 && Math.abs(sumK - v.kcal) > v.kcal * 0.05);
+  }
+}
+
+function dcSetUnitLabels() {
+  document.getElementById('btn-dc-unit').textContent = dcUnit === 'pct' ? 'Usar gramas' : 'Usar %';
+  document.querySelectorAll('[data-dc-unit]').forEach(s => { s.textContent = dcUnit === 'pct' ? '%' : 'g'; });
+}
+
+document.getElementById('btn-diet-config').addEventListener('click', () => {
+  if (!dietDay) return;
+  const c = dietDay.config;
+  dcUnit = 'pct';
+  dcSetUnitLabels();
+  document.getElementById('dc-kcal').value = c.kcal_goal;
+  document.getElementById('dc-carb').value = c.carb_pct;
+  document.getElementById('dc-prot').value = c.protein_pct;
+  document.getElementById('dc-fat').value = c.fat_pct;
+  document.getElementById('dc-idr-note').textContent = 'meta diária de energia';
+  dcRefresh();
+  modalDietConfig.classList.remove('hidden');
+});
+
+['dc-kcal', 'dc-carb', 'dc-prot', 'dc-fat'].forEach(id => {
+  document.getElementById(id).addEventListener('input', dcRefresh);
+});
+
+// Alterna % <-> gramas convertendo os valores atuais
+document.getElementById('btn-dc-unit').addEventListener('click', () => {
+  const v = dcVals();
+  if (dcUnit === 'pct') {
+    dcUnit = 'g';
+    document.getElementById('dc-carb').value = Math.round((v.kcal * v.carb / 100) / 4);
+    document.getElementById('dc-prot').value = Math.round((v.kcal * v.prot / 100) / 4);
+    document.getElementById('dc-fat').value = Math.round((v.kcal * v.fat / 100) / 9);
+  } else {
+    dcUnit = 'pct';
+    const kc = { carb: v.carb * 4, prot: v.prot * 4, fat: v.fat * 9 };
+    const sumK = kc.carb + kc.prot + kc.fat;
+    const c = sumK > 0 ? Math.round((kc.carb / sumK) * 100) : 40;
+    const p = sumK > 0 ? Math.round((kc.prot / sumK) * 100) : 30;
+    document.getElementById('dc-carb').value = c;
+    document.getElementById('dc-prot').value = p;
+    document.getElementById('dc-fat').value = 100 - c - p;
+  }
+  dcSetUnitLabels();
+  dcRefresh();
+});
+
+// IDR estimado (Mifflin-St Jeor × fator de atividade pela frequência de treino)
+document.getElementById('btn-dc-idr').addEventListener('click', () => {
+  const p = profileData || {};
+  const comPeso = measurements.filter(m => m.peso != null);
+  const peso = comPeso.length ? comPeso[comPeso.length - 1].peso : null;
+  if (!p.sexo || !p.idade || !p.altura || !peso) {
+    toastMsg('Preencha sexo, idade e altura no Perfil e registre seu peso em Corpo.');
+    return;
+  }
+  const base = 10 * peso + 6.25 * p.altura - 5 * p.idade + (p.sexo === 'Feminino' ? -161 : 5);
+  const freq = +p.freq || 3;
+  const fator = freq <= 1 ? 1.2 : freq <= 3 ? 1.375 : freq <= 5 ? 1.55 : 1.725;
+  const idr = Math.round((base * fator) / 10) * 10;
+  document.getElementById('dc-kcal').value = idr;
+  document.getElementById('dc-idr-note').textContent = `IDR estimado: ${idr} kcal/dia (${freq}x treino/semana)`;
+  dcRefresh();
+});
+
+document.getElementById('btn-dc-cancel').addEventListener('click', () => modalDietConfig.classList.add('hidden'));
+modalDietConfig.addEventListener('click', e => { if (e.target === modalDietConfig) modalDietConfig.classList.add('hidden'); });
+
+document.getElementById('diet-config-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const v = dcVals();
+  // Em gramas, envia a participação calórica de cada macro; o servidor normaliza para 100%
+  const pcts = dcUnit === 'pct'
+    ? { carb: v.carb, prot: v.prot, fat: v.fat }
+    : { carb: v.carb * 4, prot: v.prot * 4, fat: v.fat * 9 };
+  await api('PUT', '/api/diet-config', {
+    kcal_goal: v.kcal,
+    carb_pct: pcts.carb,
+    protein_pct: pcts.prot,
+    fat_pct: pcts.fat,
+  });
+  modalDietConfig.classList.add('hidden');
+  toastMsg('Metas atualizadas!');
+  loadDietaData();
 });
 
 // Init

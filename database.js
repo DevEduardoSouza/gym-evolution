@@ -236,6 +236,94 @@ db.exec(`
   tx();
 })();
 
+// ======== DIETA ========
+
+// Busca sem acento: "feijao" encontra "Feijão"
+function normalizeFoodName(s) {
+  return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+}
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS food_library (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    name TEXT NOT NULL,
+    name_norm TEXT NOT NULL DEFAULT '',
+    category TEXT DEFAULT '',
+    kcal REAL NOT NULL DEFAULT 0,
+    protein_g REAL NOT NULL DEFAULT 0,
+    carb_g REAL NOT NULL DEFAULT 0,
+    fat_g REAL NOT NULL DEFAULT 0,
+    fiber_g REAL NOT NULL DEFAULT 0
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS meal_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    date TEXT NOT NULL,
+    meal TEXT NOT NULL DEFAULT 'almoco',
+    food_id INTEGER NOT NULL,
+    grams REAL NOT NULL DEFAULT 100,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS diet_config (
+    user_id INTEGER PRIMARY KEY,
+    kcal_goal INTEGER DEFAULT 2500,
+    protein_goal INTEGER DEFAULT 130,
+    carb_pct INTEGER DEFAULT 40,
+    protein_pct INTEGER DEFAULT 30,
+    fat_pct INTEGER DEFAULT 30
+  )
+`);
+
+// Migração: metas de macros em % (deriva o % de proteína da meta em gramas que já existia)
+(function migrateDietPcts() {
+  if (tableColumns('diet_config').includes('protein_pct')) return;
+  db.exec('ALTER TABLE diet_config ADD COLUMN carb_pct INTEGER DEFAULT 40');
+  db.exec('ALTER TABLE diet_config ADD COLUMN protein_pct INTEGER DEFAULT 30');
+  db.exec('ALTER TABLE diet_config ADD COLUMN fat_pct INTEGER DEFAULT 30');
+  db.prepare('SELECT user_id, kcal_goal, protein_goal FROM diet_config').all().forEach(r => {
+    if (!r.kcal_goal || !r.protein_goal) return;
+    let p = Math.round((r.protein_goal * 4 / r.kcal_goal) * 100);
+    p = Math.min(60, Math.max(10, p));
+    const carb = Math.round((100 - p) * 0.55);
+    db.prepare('UPDATE diet_config SET protein_pct = ?, carb_pct = ?, fat_pct = ? WHERE user_id = ?')
+      .run(p, carb, 100 - p - carb, r.user_id);
+  });
+})();
+
+// Popular a biblioteca global de alimentos (user_id NULL) a partir do seed (TBCA + TACO).
+// Roda como "top-up": insere só o que ainda não existe por name_norm, então um banco
+// já semeado com a TACO ganha os novos alimentos sem duplicar nem perder ids.
+(function seedFoodLibrary() {
+  let seed;
+  try {
+    seed = require('./food-seed.json');
+  } catch {
+    return;
+  }
+  const existing = new Set(
+    db.prepare('SELECT name_norm FROM food_library WHERE user_id IS NULL').all().map(r => r.name_norm)
+  );
+  const missing = seed.filter(f => !existing.has(normalizeFoodName(f.name)));
+  if (missing.length === 0) return;
+  const insert = db.prepare(
+    'INSERT INTO food_library (user_id, name, name_norm, category, kcal, protein_g, carb_g, fat_g, fiber_g) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?)'
+  );
+  const tx = db.transaction(() => {
+    for (const f of missing) {
+      insert.run(f.name, normalizeFoodName(f.name), f.category || '', f.kcal || 0, f.protein_g || 0, f.carb_g || 0, f.fat_g || 0, f.fiber_g || 0);
+    }
+  });
+  tx();
+  console.log(`Biblioteca de alimentos: +${missing.length} itens do seed`);
+})();
+
 // ======== MIGRAÇÕES (banco antigo, dado único -> por usuário) ========
 
 // measurements e progressao_carga: basta adicionar a coluna e atribuir ao dono
@@ -314,6 +402,7 @@ db.exec(`
 function ensureUserRows(userId) {
   db.prepare('INSERT OR IGNORE INTO profile (user_id) VALUES (?)').run(userId);
   db.prepare('INSERT OR IGNORE INTO water_config (user_id) VALUES (?)').run(userId);
+  db.prepare('INSERT OR IGNORE INTO diet_config (user_id) VALUES (?)').run(userId);
 }
 
-module.exports = { db, ensureUserRows };
+module.exports = { db, ensureUserRows, normalizeFoodName };
