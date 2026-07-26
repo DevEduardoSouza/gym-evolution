@@ -561,6 +561,17 @@ function render() {
   const evoToM = evoToId ? measurements.find(m => m.id === evoToId) : null;
   const hasCustomEvo = evoFromM && evoToM;
 
+  // A dica acompanha o estado da seleção (no celular é o único feedback textual)
+  const hint = document.getElementById('table-hint');
+  if (hint) {
+    hint.classList.toggle('active', !!evoFromM);
+    hint.textContent = hasCustomEvo
+      ? `Comparando ${formatShortDate(evoFromM.date)} → ${formatShortDate(evoToM.date)}`
+      : evoFromM
+        ? 'Agora toque na segunda data'
+        : 'Toque em duas datas para comparar períodos';
+  }
+
   // Build header
   let headHtml = '<tr><th>Medida</th><th class="col-spark">Tendência</th>';
   measurements.forEach(m => {
@@ -570,12 +581,14 @@ function render() {
     const selClass = isEvoFrom ? 'evo-selected evo-from' : isEvoTo ? 'evo-selected evo-to' : '';
     const picking = evoFromId !== null && evoToId === null && !isEvoFrom ? 'evo-pickable' : '';
 
-    headHtml += `<th class="${selClass} ${picking}">
-      <span class="header-date" onclick="selectEvoColumn(${m.id})" title="Clique para comparar">${formatShortDate(m.date)}</span>
+    // O th inteiro seleciona a coluna (alvo de toque grande p/ celular);
+    // os botões interrompem a propagação pra não selecionar junto
+    headHtml += `<th class="${selClass} ${picking}" onclick="selectEvoColumn(${m.id})">
+      <span class="header-date" title="Clique para comparar">${formatShortDate(m.date)}</span>
       ${m.label ? `<span class="header-label">${m.label}</span>` : ''}
       <span class="header-actions">
-        <button class="btn-icon btn-edit" onclick="editMeasurement(${m.id})" title="Editar">&#9998;</button>
-        <button class="btn-icon btn-delete" onclick="deleteMeasurement(${m.id})" title="Excluir">&#10005;</button>
+        <button class="btn-icon btn-edit" onclick="event.stopPropagation(); editMeasurement(${m.id})" title="Editar">&#9998;</button>
+        <button class="btn-icon btn-delete" onclick="event.stopPropagation(); deleteMeasurement(${m.id})" title="Excluir">&#10005;</button>
       </span>
     </th>`;
   });

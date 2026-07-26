@@ -3221,8 +3221,19 @@ td.evo-col-highlight { background: rgba(255, 255, 255, 0.06) !important; }
 .evo-pill.neutral { background: rgba(255, 255, 255, 0.05); color: var(--faint); }
 
 @media (max-width: 700px) {
-  .table-hint { display: none; }
-  .table-bar { padding: 14px 16px 12px; }
+  .table-bar { padding: 14px 16px 12px; flex-wrap: wrap; gap: 8px; }
+  .table-hint { font-size: 0.68rem; }
+}
+
+/* Telas de toque: sem hover — botões sempre visíveis e alvos de toque maiores */
+@media (hover: none) {
+  thead th .header-actions { opacity: 1; }
+  thead th { cursor: pointer; touch-action: manipulation; }
+  thead th .btn-icon { padding: 6px 8px; }
+}
+.table-hint.active {
+  color: #fff;
+  border-color: var(--border-soft);
 }
 
 /* ===== Sistema de animações (motion) ===== */

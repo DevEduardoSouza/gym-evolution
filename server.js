@@ -1052,16 +1052,72 @@ app.get('/api/foods', (req, res) => {
     return res.json(recent);
   }
   const words = q.split(/\s+/).filter(Boolean).slice(0, 5);
-  const where = words.map(() => 'f.name_norm LIKE ?').join(' AND ');
-  const params = words.map(w => `%${w}%`);
+  // cada palavra precisa casar no início de uma palavra do nome ("ovo" não acha "provolone")
+  const boundary = "(' ' || replace(replace(f.name_norm, '-', ' '), '(', ' '))";
+  const where = words.map(() => `${boundary} LIKE ?`).join(' AND ');
+  const params = words.map(w => `% ${w}%`);
   const rows = db.prepare(`
-    SELECT f.id, f.name, f.category, f.kcal, f.protein_g, f.carb_g, f.fat_g, f.user_id
+    SELECT f.id, f.name, f.name_norm, f.category, f.kcal, f.protein_g, f.carb_g, f.fat_g, f.user_id,
+           COUNT(m.id) AS uses
     FROM food_library f
+    LEFT JOIN meal_log m ON m.food_id = f.id AND m.user_id = ?
     WHERE (f.user_id IS NULL OR f.user_id = ?) AND ${where}
-    ORDER BY (f.user_id IS NULL), length(f.name) LIMIT 30
-  `).all(uid, ...params);
-  res.json(rows);
+    GROUP BY f.id
+    ORDER BY length(f.name) LIMIT 600
+  `).all(uid, uid, ...params);
+
+  const qFull = words.join(' ');
+  const askedRaw = /\bcrua?s?\b/.test(qFull);
+  const score = f => {
+    let s = 0;
+    if (f.user_id != null) s += 2000;                              // alimento do próprio usuário
+    s += Math.min(f.uses, 10) * 150;                               // hábito: o que ele sempre registra
+    if (STAPLE_FOODS.has(f.name)) s += 500;                        // básicos do prato brasileiro
+    if (f.name_norm.startsWith(qFull)) s += 250;                   // começa pelo que foi digitado
+    if (!askedRaw && /\bcrua?s?\b/.test(f.name_norm)) s -= 200;    // cru só quando pedido
+    s -= Math.min(f.name.length, 120);                             // nome curto = comida simples
+    return s;
+  };
+  rows.sort((a, b) => score(b) - score(a) || a.name.length - b.name.length);
+  res.json(rows.slice(0, 30).map(({ name_norm, uses, ...rest }) => rest));
 });
+
+// Preparações mais comuns dos alimentos básicos: ganham prioridade na busca
+// (nomes exatos da biblioteca TBCA/TACO)
+const STAPLE_FOODS = new Set([
+  'Arroz, tipo 1, cozido',
+  'Arroz, integral, cozido',
+  'Feijão, carioca, cozido',
+  'Feijão, preto, cozido',
+  'Frango, peito, sem pele, grelhado',
+  'Frango, peito, sem pele, cozido',
+  'Ovo, de galinha, inteiro, cozido/10minutos',
+  'Ovo, de galinha, inteiro, frito',
+  'Carne, bovina, acém, moído, cozido',
+  'Carne, bovina, patinho, sem gordura, grelhado',
+  'Carne, bovina, picanha, com gordura, grelhada',
+  'Batata, inglesa, cozida',
+  'Batata, doce, cozida',
+  'Macarrão, trigo, cozido, drenado, s/ óleo, c/ sal',
+  'Pão, trigo, francês',
+  'Pão, trigo, forma, integral',
+  'Leite, vaca, integral, fluído',
+  'Iogurte, natural',
+  'Banana, in natura',
+  'Maçã, Fuji, com casca, crua',
+  'Laranja, pêra, crua',
+  'Mamão, Formosa, cru',
+  'Alface, crespa, crua',
+  'Tomate, cru',
+  'Cenoura, crua',
+  'Azeite, oliva',
+  'Açúcar, cristal',
+  'Café, infusão 10%',
+  'Tapioca, sem manteiga, sem recheio',
+  'Cuscuz de milho, cozido, c/ sal',
+  'Aveia, flocos, crua',
+  'Queijo, muçarela (média de diferentes amostras)',
+]);
 
 // Alimento personalizado do usuário (valores por 100 g)
 app.post('/api/foods', (req, res) => {
