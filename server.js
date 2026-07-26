@@ -1077,6 +1077,76 @@ app.get('/api/wrapped', (req, res) => {
   });
 });
 
+// Card "Treino de Hoje" (para o usuário postar o treino do dia)
+app.get('/api/wrapped/today', (req, res) => {
+  const uid = req.session.userId;
+  const today = new Date().toLocaleDateString('en-CA');
+  const wd = weekdayOf(today);
+
+  const exercicios = db.prepare(`
+    SELECT el.name, el.muscle, pi.current_weight
+    FROM workout_log wl
+    JOIN plan_items pi ON pi.id = wl.plan_item_id
+    JOIN exercise_library el ON el.id = pi.exercise_id
+    WHERE wl.user_id = ? AND wl.date = ?
+    ORDER BY pi.position, pi.id
+  `).all(uid, today);
+
+  const feitos = db.prepare('SELECT COUNT(*) n FROM workout_log WHERE user_id = ? AND date = ?').get(uid, today).n;
+  const planejados = db.prepare('SELECT COUNT(*) n FROM plan_items WHERE user_id = ? AND weekday = ?').get(uid, wd).n;
+  const complete = planejados > 0 && feitos >= planejados;
+  const xp = feitos * XP_PER_EXERCISE + (complete ? XP_DAY_BONUS : 0);
+
+  const sr = db.prepare(
+    'SELECT COUNT(*) AS sets, COALESCE(SUM(reps), 0) AS reps, COALESCE(SUM(weight * reps), 0) AS vol FROM progressao_carga WHERE user_id = ? AND set_number >= 1 AND date = ?'
+  ).get(uid, today);
+
+  const top = db.prepare(
+    'SELECT exercise, MAX(weight) AS weight FROM progressao_carga WHERE user_id = ? AND date = ?'
+  ).get(uid, today);
+
+  // PRs de hoje: top set do dia superou o máximo histórico anterior
+  const prs = db.prepare(`
+    SELECT t.exercise, t.w AS weight
+    FROM (SELECT exercise, MAX(weight) w FROM progressao_carga WHERE user_id = ? AND date = ? GROUP BY exercise) t
+    WHERE t.w > (SELECT MAX(weight) FROM progressao_carga p WHERE p.user_id = ? AND p.exercise = t.exercise AND p.date < ?)
+  `).all(uid, today, uid, today);
+
+  // Sequência atual de dias treinando, terminando hoje
+  const dates = new Set(db.prepare('SELECT DISTINCT date FROM workout_log WHERE user_id = ?').all(uid).map(r => r.date));
+  let streak = 0;
+  const cur = new Date();
+  while (dates.has(cur.toLocaleDateString('en-CA'))) {
+    streak++;
+    cur.setDate(cur.getDate() - 1);
+  }
+
+  const wcfg = getWaterConfig(uid);
+  const aguaMl = db.prepare(
+    'SELECT COALESCE(SUM(bottles), 0) b FROM water_intake WHERE user_id = ? AND date = ?'
+  ).get(uid, today).b * wcfg.bottle_size_ml;
+
+  const g = computeGami(uid);
+
+  res.json({
+    date: today,
+    weekday: wd,
+    exercicios,
+    feitos,
+    planejados,
+    complete,
+    xp,
+    sets: sr.sets,
+    reps: sr.reps,
+    volumeKg: Math.round(sr.vol),
+    topSet: top && top.weight ? top : null,
+    prs,
+    streak,
+    aguaL: +(aguaMl / 1000).toFixed(1),
+    level: g.level,
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`Servidor rodando em http://localhost:${PORT}`);
 });

@@ -3696,6 +3696,13 @@ body.anim-flip .ex-anim2 .f2 { opacity: 1; }
   margin-bottom: 12px;
 }
 
+.hoje-treino-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .hoje-side {
   display: flex;
   flex-direction: column;

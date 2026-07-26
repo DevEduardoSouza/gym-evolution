@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Login - Evolução Corporal</title>
+  <title>Entrar — Gym Evolution</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#000000">
@@ -11,52 +11,424 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Gym">
-  <link rel="stylesheet" href="style.css">
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
     }
   </script>
+  <style>
+    :root {
+      --bg: #09090b;
+      --panel: #0e0e11;
+      --line: #232326;
+      --line-2: #2e2e33;
+      --text: #f5f5f7;
+      --muted: #8e8e93;
+      --faint: #6b6b72;
+      --green: #30d158;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .auth-shell {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    /* ---- Coluna do formulário ---- */
+    .auth-main {
+      display: flex;
+      flex-direction: column;
+      padding: 28px 24px;
+      animation: rise 0.5s ease both;
+    }
+
+    .auth-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 800;
+      font-size: 0.82rem;
+      letter-spacing: 0.22em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .auth-brand .logo {
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      background: var(--text);
+      color: #000;
+      display: grid;
+      place-items: center;
+      letter-spacing: 0;
+      font-size: 1rem;
+    }
+
+    .auth-form-wrap {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .auth-card {
+      width: min(360px, 100%);
+    }
+
+    .auth-card h1 {
+      font-size: 1.7rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+
+    .auth-sub {
+      color: var(--muted);
+      font-size: 0.92rem;
+      margin: 8px 0 30px;
+    }
+
+    .field { margin-bottom: 16px; }
+
+    .field label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 7px;
+    }
+
+    .field .control { position: relative; }
+
+    .field input {
+      width: 100%;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      color: var(--text);
+      font: inherit;
+      font-size: 0.95rem;
+      padding: 12px 14px;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .field input::placeholder { color: #47474d; }
+    .field input:hover { border-color: var(--line-2); }
+
+    .field input:focus {
+      outline: none;
+      border-color: #86868c;
+      box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
+    }
+
+    .eye-btn {
+      position: absolute;
+      right: 6px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      color: var(--faint);
+      cursor: pointer;
+      padding: 7px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+    }
+    .eye-btn:hover { color: var(--text); }
+    .eye-btn svg { width: 18px; height: 18px; }
+
+    .auth-error {
+      display: none;
+      background: rgba(255, 69, 58, 0.1);
+      border: 1px solid rgba(255, 69, 58, 0.35);
+      color: #ff6961;
+      font-size: 0.85rem;
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin-bottom: 16px;
+    }
+
+    .submit-btn {
+      width: 100%;
+      background: var(--text);
+      color: #000;
+      border: none;
+      border-radius: 10px;
+      font: inherit;
+      font-size: 0.95rem;
+      font-weight: 700;
+      padding: 12px;
+      cursor: pointer;
+      transition: transform 0.12s, opacity 0.15s;
+    }
+
+    .submit-btn:hover { opacity: 0.9; }
+    .submit-btn:active { transform: scale(0.985); }
+    .submit-btn:disabled { opacity: 0.55; cursor: default; }
+
+    .switch-row {
+      margin-top: 22px;
+      text-align: center;
+      font-size: 0.88rem;
+      color: var(--muted);
+    }
+
+    .switch-row a {
+      color: var(--text);
+      font-weight: 600;
+      text-decoration: none;
+      border-bottom: 1px solid var(--line-2);
+      padding-bottom: 1px;
+    }
+    .switch-row a:hover { border-color: var(--text); }
+
+    .auth-foot {
+      font-size: 0.75rem;
+      color: #47474d;
+      text-align: center;
+    }
+
+    :focus-visible {
+      outline: 2px solid var(--text);
+      outline-offset: 2px;
+    }
+
+    /* ---- Coluna da marca ---- */
+    .auth-side {
+      position: relative;
+      overflow: hidden;
+      background: #000;
+      border-left: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 48px;
+    }
+
+    .auth-side::before,
+    .auth-side::after {
+      content: '';
+      position: absolute;
+      border: 44px solid rgba(255, 255, 255, 0.04);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+    .auth-side::before { width: 420px; height: 420px; top: -140px; right: -120px; }
+    .auth-side::after { width: 380px; height: 380px; bottom: -150px; left: -130px; }
+
+    .side-inner {
+      position: relative;
+      max-width: 400px;
+      animation: rise 0.6s 0.08s ease both;
+    }
+
+    .side-eyebrow {
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.3em;
+      color: var(--faint);
+      margin-bottom: 16px;
+    }
+
+    .side-inner h2 {
+      font-size: 1.9rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      line-height: 1.2;
+    }
+
+    .side-inner h2 em {
+      font-style: normal;
+      color: var(--green);
+    }
+
+    .side-sub {
+      color: var(--muted);
+      font-size: 0.95rem;
+      margin: 12px 0 34px;
+      line-height: 1.5;
+    }
+
+    /* Escada de ranks */
+    .ladder { position: relative; padding-left: 26px; }
+
+    .ladder::before {
+      content: '';
+      position: absolute;
+      left: 8px;
+      top: 12px;
+      bottom: 12px;
+      width: 2px;
+      background: linear-gradient(to top, var(--line), var(--text));
+    }
+
+    .rung {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 0;
+      color: var(--faint);
+      font-size: 0.92rem;
+      font-weight: 600;
+    }
+
+    .rung::before {
+      content: '';
+      position: absolute;
+      left: -23px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--line-2);
+    }
+
+    .rung small { font-weight: 500; color: #47474d; }
+
+    .rung.top { color: var(--text); }
+    .rung.top::before { background: var(--text); box-shadow: 0 0 12px rgba(255, 255, 255, 0.55); }
+
+    .rung.top .pill {
+      background: var(--text);
+      color: #000;
+      font-weight: 800;
+      font-size: 0.82rem;
+      padding: 4px 12px;
+      border-radius: 999px;
+    }
+
+    .rung.start::before { background: var(--green); }
+    .rung.start small { color: var(--green); font-weight: 600; }
+
+    .side-stats {
+      display: flex;
+      gap: 22px;
+      margin-top: 34px;
+      padding-top: 22px;
+      border-top: 1px solid var(--line);
+    }
+
+    .side-stat b {
+      display: block;
+      font-size: 1.05rem;
+      font-weight: 800;
+    }
+
+    .side-stat span {
+      font-size: 0.75rem;
+      color: var(--faint);
+    }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: none; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .auth-main, .side-inner { animation: none; }
+    }
+
+    @media (max-width: 860px) {
+      .auth-shell { grid-template-columns: 1fr; }
+      .auth-side { display: none; }
+      .auth-main { padding: 22px 20px; min-height: 100vh; min-height: 100dvh; }
+    }
+  </style>
 </head>
 <body>
-  <div class="login-container">
-    <div class="login-card">
-      <h1 class="login-title">Gym Evolution</h1>
-      <p class="login-subtitle">Acompanhamento de Evolução Corporal</p>
+  <div class="auth-shell">
+    <div class="auth-main">
+      <div class="auth-brand"><span class="logo">🏋️</span> Gym Evolution</div>
 
-      <form id="login-form">
-        <div class="form-group">
-          <label for="username">Usuário</label>
-          <input type="text" id="username" name="username" autocomplete="username" required autofocus>
-        </div>
-        <div class="form-group">
-          <label for="password">Senha</label>
-          <input type="password" id="password" name="password" autocomplete="current-password" required>
-        </div>
-        <p id="login-error" class="login-error" style="display:none;"></p>
-        <button type="submit" class="btn-primary login-btn">Entrar</button>
-        <p class="login-switch">Não tem conta? <a href="#" id="show-register">Criar conta</a></p>
-      </form>
+      <div class="auth-form-wrap">
+        <div class="auth-card">
+          <form id="login-form">
+            <h1>Bem-vindo de volta</h1>
+            <p class="auth-sub">Entre para continuar sua evolução.</p>
+            <div class="field">
+              <label for="username">Usuário</label>
+              <div class="control">
+                <input type="text" id="username" name="username" autocomplete="username" placeholder="seu.usuario" required autofocus>
+              </div>
+            </div>
+            <div class="field">
+              <label for="password">Senha</label>
+              <div class="control">
+                <input type="password" id="password" name="password" autocomplete="current-password" placeholder="••••••••" required>
+                <button type="button" class="eye-btn" data-eye="password" aria-label="Mostrar senha"></button>
+              </div>
+            </div>
+            <p id="login-error" class="auth-error"></p>
+            <button type="submit" class="submit-btn">Entrar</button>
+            <p class="switch-row">Não tem conta? <a href="#" id="show-register">Criar conta</a></p>
+          </form>
 
-      <form id="register-form" style="display:none;">
-        <div class="form-group">
-          <label for="reg-username">Usuário</label>
-          <input type="text" id="reg-username" autocomplete="username" required
-                 minlength="3" maxlength="20" pattern="[a-zA-Z0-9._-]{3,20}"
-                 title="3 a 20 caracteres: letras, números, ponto, hífen ou underline">
+          <form id="register-form" style="display:none;">
+            <h1>Criar sua conta</h1>
+            <p class="auth-sub">Comece a transformar treino em progresso.</p>
+            <div class="field">
+              <label for="reg-username">Usuário</label>
+              <div class="control">
+                <input type="text" id="reg-username" autocomplete="username" placeholder="seu.usuario" required
+                       minlength="3" maxlength="20" pattern="[a-zA-Z0-9._-]{3,20}"
+                       title="3 a 20 caracteres: letras, números, ponto, hífen ou underline">
+              </div>
+            </div>
+            <div class="field">
+              <label for="reg-password">Senha</label>
+              <div class="control">
+                <input type="password" id="reg-password" autocomplete="new-password" placeholder="mínimo 4 caracteres" required minlength="4">
+                <button type="button" class="eye-btn" data-eye="reg-password" aria-label="Mostrar senha"></button>
+              </div>
+            </div>
+            <div class="field">
+              <label for="reg-password2">Confirmar senha</label>
+              <div class="control">
+                <input type="password" id="reg-password2" autocomplete="new-password" placeholder="repita a senha" required minlength="4">
+              </div>
+            </div>
+            <p id="register-error" class="auth-error"></p>
+            <button type="submit" class="submit-btn">Criar conta</button>
+            <p class="switch-row">Já tem conta? <a href="#" id="show-login">Entrar</a></p>
+          </form>
         </div>
-        <div class="form-group">
-          <label for="reg-password">Senha</label>
-          <input type="password" id="reg-password" autocomplete="new-password" required minlength="4">
+      </div>
+
+      <p class="auth-foot">gym.genustech.com.br</p>
+    </div>
+
+    <div class="auth-side">
+      <div class="side-inner">
+        <p class="side-eyebrow">G Y M &nbsp; E V O L U T I O N</p>
+        <h2>Cada treino vira <em>XP</em>.<br>Cada semana, um ranking.</h2>
+        <p class="side-sub">Marque os exercícios do dia, registre suas cargas e suba de nível — do Frango até a Lenda.</p>
+
+        <div class="ladder">
+          <div class="rung top"><span class="pill">Lenda</span></div>
+          <div class="rung">Monstro</div>
+          <div class="rung">Trincado</div>
+          <div class="rung">Maromba</div>
+          <div class="rung">Consistente</div>
+          <div class="rung start">Frango <small>· você começa aqui</small></div>
         </div>
-        <div class="form-group">
-          <label for="reg-password2">Confirmar senha</label>
-          <input type="password" id="reg-password2" autocomplete="new-password" required minlength="4">
+
+        <div class="side-stats">
+          <div class="side-stat"><b>+10 XP</b><span>por exercício</span></div>
+          <div class="side-stat"><b>+30 XP</b><span>por dia completo</span></div>
+          <div class="side-stat"><b>Seg–Dom</b><span>ranking semanal</span></div>
         </div>
-        <p id="register-error" class="login-error" style="display:none;"></p>
-        <button type="submit" class="btn-primary login-btn">Criar conta</button>
-        <p class="login-switch">Já tem conta? <a href="#" id="show-login">Entrar</a></p>
-      </form>
+      </div>
     </div>
   </div>
 
@@ -78,8 +450,25 @@
       document.getElementById('username').focus();
     });
 
-    async function submitAuth(url, body, errorEl) {
+    // Mostrar/ocultar senha
+    const EYE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+    const EYE_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+    document.querySelectorAll('.eye-btn').forEach(btn => {
+      btn.innerHTML = EYE;
+      btn.addEventListener('click', () => {
+        const input = document.getElementById(btn.dataset.eye);
+        const show = input.type === 'password';
+        input.type = show ? 'text' : 'password';
+        btn.innerHTML = show ? EYE_OFF : EYE;
+        btn.setAttribute('aria-label', show ? 'Ocultar senha' : 'Mostrar senha');
+      });
+    });
+
+    async function submitAuth(url, body, errorEl, btn) {
       errorEl.style.display = 'none';
+      const label = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Aguarde…';
       try {
         const res = await fetch(url, {
           method: 'POST',
@@ -97,6 +486,8 @@
         errorEl.textContent = 'Erro de conexão';
         errorEl.style.display = 'block';
       }
+      btn.disabled = false;
+      btn.textContent = label;
     }
 
     loginForm.addEventListener('submit', (e) => {
@@ -104,7 +495,7 @@
       submitAuth('/api/login', {
         username: document.getElementById('username').value,
         password: document.getElementById('password').value,
-      }, document.getElementById('login-error'));
+      }, document.getElementById('login-error'), loginForm.querySelector('.submit-btn'));
     });
 
     registerForm.addEventListener('submit', (e) => {
@@ -120,7 +511,7 @@
       submitAuth('/api/register', {
         username: document.getElementById('reg-username').value,
         password,
-      }, errorEl);
+      }, errorEl, registerForm.querySelector('.submit-btn'));
     });
   </script>
 </body>

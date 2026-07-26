@@ -87,7 +87,10 @@
               <h3 id="hoje-treino-title">Treino de hoje</h3>
               <p class="day-sub" id="hoje-treino-sub"></p>
             </div>
-            <button id="btn-hoje-semana" class="btn-secondary btn-sm">Ver treino</button>
+            <div class="hoje-treino-actions">
+              <button id="btn-hoje-postar" class="btn-primary btn-sm" style="display:none">📸 Postar</button>
+              <button id="btn-hoje-semana" class="btn-secondary btn-sm">Ver treino</button>
+            </div>
           </div>
           <div id="hoje-exercicios" class="hoje-exercicios"></div>
           <p id="hoje-treino-empty" class="empty-msg" style="display:none">Dia livre hoje. Descansa que amanhã tem! 🛌</p>
@@ -523,6 +526,7 @@
   <div id="modal-wrapped" class="modal-overlay hidden">
     <div class="wrapped-panel">
       <div class="wrapped-tabs">
+        <button type="button" class="wrapped-tab" data-v="hoje">⚡ Hoje</button>
         <button type="button" class="wrapped-tab active" data-v="treino">🏋️ Treino</button>
         <button type="button" class="wrapped-tab" data-v="meta">🎯 Meta de peso</button>
       </div>

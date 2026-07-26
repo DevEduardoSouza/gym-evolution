@@ -2482,6 +2482,7 @@ function renderHoje(plan, logs, gami, tstats, wcfg, wint, ranking) {
   document.getElementById('hoje-treino-sub').textContent = items.length
     ? `${hojeMuscles} · ${doneCount}/${items.length} concluídos`
     : '';
+  document.getElementById('btn-hoje-postar').style.display = doneCount > 0 ? '' : 'none';
 
   const listEl = document.getElementById('hoje-exercicios');
   document.getElementById('hoje-treino-empty').style.display = items.length ? 'none' : '';
@@ -2928,6 +2929,7 @@ refreshNotifBadge();
 // ======== RETROSPECTIVA (estilo wrapped, com variações) ========
 const modalWrapped = document.getElementById('modal-wrapped');
 let wrappedData = null;
+let wrappedTodayData = null;
 let wrappedAvatar = null;
 let wrappedVariant = 'treino';
 
@@ -2973,7 +2975,7 @@ function kgTxt(v) {
 }
 
 // ---- Partes comuns do card ----
-function wrappedBase(ctx, W, H, subtitle) {
+function wrappedBase(ctx, W, H, subtitle, title = 'Retrospectiva') {
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, W, H);
@@ -2990,7 +2992,7 @@ function wrappedBase(ctx, W, H, subtitle) {
   ctx.fillText('G Y M   E V O L U T I O N', W / 2, 130);
   ctx.fillStyle = '#fff';
   ctx.font = '800 92px system-ui';
-  ctx.fillText('Retrospectiva', W / 2, 235);
+  ctx.fillText(title, W / 2, 235);
   ctx.fillStyle = '#6b6b72';
   ctx.font = '600 36px system-ui';
   ctx.fillText(subtitle, W / 2, 295);
@@ -3133,6 +3135,112 @@ function drawWrappedTreino() {
   wrappedFooter(ctx, W, H);
 }
 
+// ---- Variação: Treino de Hoje (para postar o treino do dia) ----
+function drawWrappedHoje() {
+  const c = document.getElementById('wrapped-canvas');
+  const ctx = c.getContext('2d');
+  const W = 1080;
+  const H = 1920;
+  const d = wrappedTodayData;
+  if (!d || !d.feitos) return drawWrappedTreino();
+  const center = W / 2;
+  const username = (meData && meData.username) || '';
+  const rank = RANKS[Math.min((d.level || 1) - 1, RANKS.length - 1)];
+
+  wrappedBase(ctx, W, H, `${WEEKDAY_NAMES[d.weekday]} · ${formatDate(d.date)}`, 'Treino de Hoje');
+  let y = wrappedIdentity(ctx, W, username, `Nível ${d.level} · ${rank}`);
+
+  // Grupos musculares do dia
+  const muscles = [...new Set(d.exercicios.map(e => e.muscle).filter(Boolean))].join(' + ') || 'Treino do dia';
+  y += 140;
+  ctx.fillStyle = '#fff';
+  let size = 84;
+  ctx.font = `800 ${size}px system-ui`;
+  while (size > 44 && ctx.measureText(muscles).width > W - 120) {
+    size -= 4;
+    ctx.font = `800 ${size}px system-ui`;
+  }
+  ctx.fillText(muscles, center, y);
+
+  y += 54;
+  ctx.fillStyle = d.complete ? '#30d158' : '#8e8e93';
+  ctx.font = '700 38px system-ui';
+  ctx.fillText(
+    d.complete
+      ? '✅ Treino completo!'
+      : `${d.feitos}/${d.planejados || d.feitos} exercícios concluídos`,
+    center, y
+  );
+
+  y += 96;
+  y = wrappedStatsGrid(ctx, W, y, [
+    [wrappedFmt(d.sets), 'séries'],
+    [wrappedFmt(d.reps), 'reps'],
+    [wrappedFmt(d.volumeKg) + ' kg', 'movimentados'],
+    [`+${d.xp} XP`, 'ganhos hoje', '#30d158'],
+  ], 138);
+
+  if (d.volumeKg > 0) {
+    y += 36;
+    ctx.fillStyle = '#8e8e93';
+    ctx.font = '700 34px system-ui';
+    ctx.fillText(volumeEquiv(d.volumeKg), center, y);
+  }
+
+  // Lista de exercícios feitos
+  const MAX_EX = 6;
+  if (d.exercicios.length) {
+    y += 74;
+    ctx.fillStyle = '#6b6b72';
+    ctx.font = '700 27px system-ui';
+    ctx.fillText('E X E R C Í C I O S', center, y);
+    d.exercicios.slice(0, MAX_EX).forEach(e => {
+      y += 52;
+      const carga = e.current_weight != null ? ` · ${kgTxt(e.current_weight)} kg` : '';
+      ctx.fillStyle = '#d0d0d5';
+      ctx.font = '600 37px system-ui';
+      ctx.fillText(`✓ ${e.name}${carga}`, center, y);
+    });
+    if (d.exercicios.length > MAX_EX) {
+      y += 46;
+      ctx.fillStyle = '#6b6b72';
+      ctx.font = '600 32px system-ui';
+      ctx.fillText(`+ ${d.exercicios.length - MAX_EX} outros`, center, y);
+    }
+  }
+
+  // PR do dia (senão, top set)
+  if (d.prs && d.prs.length) {
+    const pr = d.prs[0];
+    y += 76;
+    ctx.fillStyle = '#6b6b72';
+    ctx.font = '700 27px system-ui';
+    ctx.fillText('R E C O R D E   N O V O', center, y);
+    y += 52;
+    ctx.fillStyle = '#30d158';
+    ctx.font = '800 47px system-ui';
+    ctx.fillText(`🏆 ${pr.exercise} · ${kgTxt(pr.weight)} kg`, center, y);
+  } else if (d.topSet) {
+    y += 76;
+    ctx.fillStyle = '#6b6b72';
+    ctx.font = '700 27px system-ui';
+    ctx.fillText('T O P   S E T', center, y);
+    y += 52;
+    ctx.fillStyle = '#fff';
+    ctx.font = '800 47px system-ui';
+    ctx.fillText(`${d.topSet.exercise} · ${kgTxt(d.topSet.weight)} kg`, center, y);
+  }
+
+  if (d.streak >= 2 && y <= H - 160) {
+    y += 60;
+    ctx.fillStyle = '#ff9f0a';
+    ctx.font = '700 36px system-ui';
+    ctx.fillText(`🔥 ${d.streak} dias seguidos treinando`, center, y);
+  }
+
+  wrappedFooter(ctx, W, H);
+}
+
 // ---- Variação 2: Meta de peso ----
 function drawWrappedMeta() {
   const c = document.getElementById('wrapped-canvas');
@@ -3213,17 +3321,25 @@ function drawWrappedMeta() {
 
 function renderWrappedCanvas() {
   if (wrappedVariant === 'meta') drawWrappedMeta();
+  else if (wrappedVariant === 'hoje') drawWrappedHoje();
   else drawWrappedTreino();
   document.querySelectorAll('.wrapped-tab').forEach(b => {
     b.classList.toggle('active', b.dataset.v === wrappedVariant);
   });
 }
 
-async function openWrapped() {
-  wrappedData = await api('GET', '/api/wrapped');
-  wrappedVariant = 'treino';
+async function openWrapped(variant) {
+  [wrappedData, wrappedTodayData] = await Promise.all([
+    api('GET', '/api/wrapped'),
+    api('GET', '/api/wrapped/today'),
+  ]);
+  const hasHoje = wrappedTodayData && wrappedTodayData.feitos > 0;
+  wrappedVariant = variant === 'hoje' && hasHoje ? 'hoje' : 'treino';
 
-  // Aba "Meta de peso" só aparece quando há meta definida + peso registrado
+  // Aba "Hoje" só aparece quando há treino feito hoje;
+  // aba "Meta de peso" só quando há meta definida + peso registrado
+  const hojeTab = document.querySelector('.wrapped-tab[data-v="hoje"]');
+  if (hojeTab) hojeTab.style.display = hasHoje ? '' : 'none';
   const metaTab = document.querySelector('.wrapped-tab[data-v="meta"]');
   if (metaTab) metaTab.style.display = wrappedMetaInfo() ? '' : 'none';
 
@@ -3250,7 +3366,8 @@ document.querySelectorAll('.wrapped-tab').forEach(b => {
   });
 });
 
-document.getElementById('btn-wrapped').addEventListener('click', openWrapped);
+document.getElementById('btn-wrapped').addEventListener('click', () => openWrapped());
+document.getElementById('btn-hoje-postar').addEventListener('click', () => openWrapped('hoje'));
 document.getElementById('btn-wrapped-close').addEventListener('click', () => modalWrapped.classList.add('hidden'));
 modalWrapped.addEventListener('click', e => { if (e.target === modalWrapped) modalWrapped.classList.add('hidden'); });
 
@@ -3260,10 +3377,11 @@ function wrappedBlobPromise() {
 
 document.getElementById('btn-wrapped-share').addEventListener('click', async () => {
   const blob = await wrappedBlobPromise();
-  const file = new File([blob], 'retrospectiva-gym.png', { type: 'image/png' });
+  const isHoje = wrappedVariant === 'hoje';
+  const file = new File([blob], isHoje ? 'treino-de-hoje-gym.png' : 'retrospectiva-gym.png', { type: 'image/png' });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     try {
-      await navigator.share({ files: [file], title: 'Minha retrospectiva no treino' });
+      await navigator.share({ files: [file], title: isHoje ? 'Meu treino de hoje' : 'Minha retrospectiva no treino' });
     } catch { /* usuário cancelou */ }
   } else {
     document.getElementById('btn-wrapped-download').click();
@@ -3275,7 +3393,7 @@ document.getElementById('btn-wrapped-download').addEventListener('click', async 
   const blob = await wrappedBlobPromise();
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'retrospectiva-gym.png';
+  a.download = wrappedVariant === 'hoje' ? 'treino-de-hoje-gym.png' : 'retrospectiva-gym.png';
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 });
