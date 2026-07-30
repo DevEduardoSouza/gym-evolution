@@ -217,19 +217,22 @@ db.exec(`
   )
 `);
 
-// Popular a biblioteca global (user_id NULL) a partir do seed, uma única vez
+// Popular a biblioteca global (user_id NULL) a partir do seed.
+// Top-up idempotente: insere apenas os nomes que ainda não existem, preservando ids.
 (function seedExerciseLibrary() {
-  const count = db.prepare('SELECT COUNT(*) AS n FROM exercise_library WHERE user_id IS NULL').get().n;
-  if (count > 0) return;
   let seed;
   try {
     seed = require('./exercise-seed.json');
   } catch {
     return;
   }
+  const existing = new Set(
+    db.prepare('SELECT name FROM exercise_library WHERE user_id IS NULL').all().map((r) => r.name)
+  );
   const insert = db.prepare('INSERT INTO exercise_library (user_id, name, muscle, image1, image2) VALUES (NULL, ?, ?, ?, ?)');
   const tx = db.transaction(() => {
     for (const ex of seed) {
+      if (existing.has(ex.name)) continue;
       insert.run(ex.name, ex.muscle, (ex.images && ex.images[0]) || '', (ex.images && ex.images[1]) || '');
     }
   });
