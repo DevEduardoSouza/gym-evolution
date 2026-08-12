@@ -1514,6 +1514,21 @@ function buildAiContext(uid) {
   if (meas.length) {
     const first = meas[0];
     const last = meas[meas.length - 1];
+
+    // Objetivo explícito: evita a IA confundir se o usuário quer ganhar ou perder peso
+    if (last.peso && profile.peso_meta) {
+      const diff = last.peso - profile.peso_meta;
+      if (Math.abs(diff) >= 0.5) {
+        lines.push(`\nOBJETIVO ATUAL: ${diff > 0 ? 'PERDER' : 'GANHAR'} ${fmtNum(Math.abs(diff))} kg (peso atual ${fmtNum(last.peso)} kg, meta ${fmtNum(profile.peso_meta)} kg).`);
+      } else {
+        lines.push(`\nOBJETIVO ATUAL: manter o peso (atual ${fmtNum(last.peso)} kg, meta ${fmtNum(profile.peso_meta)} kg).`);
+      }
+    }
+    const m30 = meas.filter(m => m.peso && m.date >= daysAgo(30));
+    if (m30.length >= 2) {
+      const d = m30[m30.length - 1].peso - m30[0].peso;
+      lines.push(`Tendência recente: ${d > 0 ? '+' : ''}${fmtNum(d)} kg nos últimos 30 dias.`);
+    }
     lines.push(`\nMedições corporais (${meas.length} registros, de ${first.date} a ${last.date}):`);
     const fields = [
       ['peso', 'Peso (kg)'], ['biceps_contraido', 'Bíceps contraído'], ['antebraco', 'Antebraço'],
@@ -1624,14 +1639,16 @@ app.post('/api/insights', async (req, res) => {
   }
 
   const system = [
-    'Você é o Coach IA do Gym Evolution, um app de acompanhamento de treino, dieta e evolução corporal.',
-    'Responda sempre em português do Brasil, de forma direta, motivadora e prática.',
-    'Seja BREVE: responda em no máximo 4-5 frases curtas (ou uma lista de até 4 itens). Vá direto ao ponto, sem introduções nem despedidas.',
-    'Só se aprofunde se o usuário pedir explicitamente mais detalhes.',
-    'Use APENAS os dados do usuário abaixo para gerar insights personalizados (evolução, pontos fortes, o que melhorar).',
-    'Se faltar algum dado, diga em uma frase o que o usuário pode começar a registrar no app.',
+    'Você é o Coach IA do Gym Evolution. Fale como um personal trainer experiente conversando com o aluno: tom natural, direto e específico, em português do Brasil.',
+    'Responda À PERGUNTA feita, em texto corrido de 2 a 5 frases. Use lista APENAS quando o usuário pedir uma análise geral com vários pontos (máximo 4 itens) — nunca duas respostas seguidas no formato de lista.',
+    'REGRA DE OURO: todo conselho precisa se apoiar em um número concreto dos dados abaixo. É PROIBIDO conselho genérico que serviria para qualquer pessoa ("ajuste a dieta", "aumente o cardio", "monitore o progresso", "considere um nutricionista"). Em vez disso, diga exatamente o que fazer e por quê, citando o dado.',
+    'Exemplo ruim: "Avalie a dieta e considere ajuda profissional." Exemplo bom: "Você está comendo em média 2900 kcal e sua meta é 2500 — cortar o lanche da noite já resolve boa parte disso."',
+    'Respeite o OBJETIVO ATUAL do usuário (perder/ganhar/manter peso) ao interpretar qualquer variação — ganho de peso só é bom se o objetivo for ganhar.',
+    'Não repita conselhos nem informações que você já deu nesta conversa; traga um ângulo novo ou aprofunde.',
+    'Nada de frase motivacional vazia no fim ("Vamos em frente!", "Continue assim!", "Você consegue!"). Termine na informação.',
+    'Se faltar o dado necessário para responder, diga em uma frase o que registrar no app — e só isso.',
     'Não invente números que não estão no contexto. Use negrito só nos números-chave.',
-    'Você não substitui médico ou nutricionista; em temas de saúde sensíveis, recomende um profissional.',
+    'Em temas clínicos (hormônios, lesões, doenças), uma frase recomendando um profissional basta — sem sermão, e ainda assim responda o que os dados permitirem.',
     '',
     '===== DADOS DO USUÁRIO =====',
     buildAiContext(req.session.userId),
@@ -1644,8 +1661,14 @@ app.post('/api/insights', async (req, res) => {
     model,
     messages: [{ role: 'system', content: system }, ...messages],
   };
-  if (isNewGen) payload.max_completion_tokens = 450;
-  else { payload.max_tokens = 450; payload.temperature = 0.7; }
+  if (isNewGen) {
+    // Modelos com reasoning gastam tokens "pensando" antes de responder
+    payload.max_completion_tokens = 2000;
+    payload.reasoning_effort = 'minimal';
+  } else {
+    payload.max_tokens = 450;
+    payload.temperature = 0.7;
+  }
 
   try {
     const ctrl = new AbortController();
