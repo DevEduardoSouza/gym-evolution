@@ -72,7 +72,6 @@ let measurements = [];
 const tableHead = document.getElementById('table-head');
 const tableBody = document.getElementById('table-body');
 const emptyMsg = document.getElementById('empty-msg');
-const periodEl = document.getElementById('period');
 const modal = document.getElementById('modal');
 const modalTitle = document.getElementById('modal-title');
 const form = document.getElementById('measurement-form');
@@ -537,14 +536,11 @@ function render() {
   emptyMsg.style.display = hasMeasurements ? 'none' : '';
 
   if (!hasMeasurements) {
-    periodEl.textContent = '';
     return;
   }
 
-  // Period
   const first = measurements[0];
   const last = measurements[measurements.length - 1];
-  periodEl.textContent = `${formatDate(first.date)} - ${formatDate(last.date)}`;
 
   const tableSub = document.getElementById('table-sub');
   if (tableSub) {
