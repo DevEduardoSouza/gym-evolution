@@ -3967,9 +3967,22 @@ document.getElementById('diet-config-form').addEventListener('submit', async e =
 
 // ======== COACH IA ========
 
-const aiMessages = [];
+let aiMessages = [];
 let aiBusy = false;
 let aiStarted = false;
+
+// Histórico persistido no navegador, separado por usuário
+function aiStorageKey() {
+  return 'gym_ai_chat_' + ((meData && meData.username) || 'me');
+}
+
+function aiSaveHistory() {
+  try { localStorage.setItem(aiStorageKey(), JSON.stringify(aiMessages.slice(-24))); } catch {}
+}
+
+function aiLoadHistory() {
+  try { return JSON.parse(localStorage.getItem(aiStorageKey())) || []; } catch { return []; }
+}
 
 function aiEscape(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -3996,13 +4009,33 @@ function aiAppendBubble(role, html) {
   return div;
 }
 
-function initAiChat() {
-  if (aiStarted) return;
-  aiStarted = true;
+function aiShowWelcome() {
   aiAppendBubble('assistant', aiRenderMd(
     'Fala! 💪 Sou o **Coach IA** do Gym Evolution. Eu conheço seus treinos, medições, dieta e progressão de carga — pergunta qualquer coisa ou toca numa sugestão abaixo.'
   ));
 }
+
+function initAiChat() {
+  if (aiStarted) return;
+  aiStarted = true;
+  const saved = aiLoadHistory();
+  if (saved.length) {
+    aiMessages = saved;
+    saved.forEach(m => aiAppendBubble(m.role, m.role === 'user' ? aiEscape(m.content) : aiRenderMd(m.content)));
+    document.getElementById('ai-suggestions').style.display = 'none';
+  } else {
+    aiShowWelcome();
+  }
+}
+
+document.getElementById('ai-new-chat').addEventListener('click', () => {
+  if (aiMessages.length && !confirm('Começar uma nova conversa? O histórico atual será apagado.')) return;
+  aiMessages = [];
+  try { localStorage.removeItem(aiStorageKey()); } catch {}
+  document.getElementById('ai-messages').innerHTML = '';
+  document.getElementById('ai-suggestions').style.display = '';
+  aiShowWelcome();
+});
 
 async function aiSend(text) {
   const q = (text || '').trim();
@@ -4032,6 +4065,7 @@ async function aiSend(text) {
     } else {
       typing.innerHTML = aiRenderMd(data.reply || '');
       aiMessages.push({ role: 'assistant', content: data.reply || '' });
+      aiSaveHistory();
     }
   } catch {
     typing.innerHTML = aiRenderMd('⚠️ Falha de conexão. Tente novamente.');
