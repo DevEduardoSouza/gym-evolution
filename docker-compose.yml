@@ -10,6 +10,8 @@ services:
       - AUTH_PASS=${AUTH_PASS:-admin}
       - SESSION_SECRET=${SESSION_SECRET:-gym-evolution-secret-change-me}
       - PORT=3000
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
     volumes:
       - gym_data:/app/data
 

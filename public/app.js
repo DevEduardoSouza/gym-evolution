@@ -1108,6 +1108,7 @@ const TAB_TITLES = {
   dieta: 'Dieta',
   treino: 'Frequência',
   ciclo: 'Treino',
+  ia: 'Coach IA',
   avisos: 'Notificações',
   perfil: 'Perfil',
 };
@@ -1150,6 +1151,7 @@ document.querySelectorAll('.nav-btn[data-tab]').forEach(btn => {
     if (tab === 'dieta') loadDietaData();
     if (tab === 'treino') loadTreinoData();
     if (tab === 'ciclo') loadCicloData();
+    if (tab === 'ia') initAiChat();
     if (tab === 'avisos') loadNotifs();
     if (tab === 'perfil') loadPerfilPage();
     if (tab !== 'avisos') refreshNotifBadge();
@@ -1440,6 +1442,8 @@ let treinoMonth = new Date().getMonth(); // 0-11
 const MONTH_NAMES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 
 const ICONS = {
+  spark: '<svg class="icon-svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l1.9 5.7a2 2 0 0 0 1.3 1.3L21 11l-5.8 2a2 2 0 0 0-1.3 1.3L12 20l-1.9-5.7a2 2 0 0 0-1.3-1.3L3 11l5.8-2a2 2 0 0 0 1.3-1.3z"/><path d="M19 15l.8 2.2a1 1 0 0 0 .6.6L22.5 19l-2.1.8a1 1 0 0 0-.6.6L19 22.5l-.8-2.1a1 1 0 0 0-.6-.6l-2.1-.8 2.1-.8a1 1 0 0 0 .6-.6z"/></svg>',
+  send: '<svg class="icon-svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3.4 20.4l17.4-7.5a1 1 0 0 0 0-1.8L3.4 3.6a1 1 0 0 0-1.4 1.1L3.5 11 14 12 3.5 13l-1.5 6.3a1 1 0 0 0 1.4 1.1z"/></svg>',
   dumbbell: '<svg class="icon-svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="1" y="8.5" width="2.5" height="7" rx="0.8"/><rect x="4" y="6" width="3" height="12" rx="0.8"/><rect x="7" y="10.5" width="10" height="3" rx="0.5"/><rect x="17" y="6" width="3" height="12" rx="0.8"/><rect x="20.5" y="8.5" width="2.5" height="7" rx="0.8"/></svg>',
   run: '<svg class="icon-svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="15.5" cy="4.5" r="2.2"/><path d="M13 7.5 9 9l-3.5 4 1.5 1.4 3-2.6 1.6 1.9-2.4 4.2-3 1.6 1 1.8 4-2 2.4-4 1.4 2 1.5 4.5 2-.6L17 17l-1.5-4 2-2 2.2 2 2.3-.7-2.5-3.7-3-1.3z"/></svg>',
   ruler: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.3 8.7L8.7 21.3a1 1 0 0 1-1.4 0L2.7 16.7a1 1 0 0 1 0-1.4L15.3 2.7a1 1 0 0 1 1.4 0l4.6 4.6a1 1 0 0 1 0 1.4z"/><path d="m7.5 10.5 2 2M10 8l2 2M12.5 5.5l2 2M5 13l2 2"/></svg>',
@@ -3963,6 +3967,95 @@ document.getElementById('diet-config-form').addEventListener('submit', async e =
   modalDietConfig.classList.add('hidden');
   toastMsg('Metas atualizadas!');
   loadDietaData();
+});
+
+// ======== COACH IA ========
+
+const aiMessages = [];
+let aiBusy = false;
+let aiStarted = false;
+
+function aiEscape(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Markdown mínimo: negrito, títulos e listas viram HTML; resto é texto escapado
+function aiRenderMd(text) {
+  let h = aiEscape(text.trim());
+  h = h.replace(/^#{1,4} (.*)$/gm, '<strong>$1</strong>');
+  h = h.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  h = h.replace(/^\s*(?:[-*•]|\d+[.)]) (.*)$/gm, '<li>$1</li>');
+  h = h.replace(/(?:<li>.*<\/li>\n?)+/g, (m) => `<ul>${m.replace(/\n/g, '')}</ul>`);
+  h = h.replace(/\n{2,}/g, '<br><br>').replace(/\n/g, '<br>');
+  return h;
+}
+
+function aiAppendBubble(role, html) {
+  const wrap = document.getElementById('ai-messages');
+  const div = document.createElement('div');
+  div.className = `ai-msg ai-msg-${role}`;
+  div.innerHTML = html;
+  wrap.appendChild(div);
+  wrap.scrollTop = wrap.scrollHeight;
+  return div;
+}
+
+function initAiChat() {
+  if (aiStarted) return;
+  aiStarted = true;
+  aiAppendBubble('assistant', aiRenderMd(
+    'Fala! 💪 Sou o **Coach IA** do Gym Evolution. Eu conheço seus treinos, medições, dieta e progressão de carga — pergunta qualquer coisa ou toca numa sugestão abaixo.'
+  ));
+}
+
+async function aiSend(text) {
+  const q = (text || '').trim();
+  if (!q || aiBusy) return;
+  aiBusy = true;
+  const input = document.getElementById('ai-input');
+  const sendBtn = document.getElementById('ai-send');
+  input.value = '';
+  sendBtn.disabled = true;
+  document.getElementById('ai-suggestions').style.display = 'none';
+
+  aiMessages.push({ role: 'user', content: q });
+  aiAppendBubble('user', aiEscape(q));
+  const typing = aiAppendBubble('assistant', '<span class="ai-typing"><span></span><span></span><span></span></span>');
+
+  try {
+    const res = await fetch('/api/insights', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: aiMessages }),
+    });
+    if (res.status === 401) { window.location.href = '/login.html'; return; }
+    const data = await res.json();
+    if (!res.ok) {
+      typing.innerHTML = aiRenderMd(`⚠️ ${data.error || 'Erro ao consultar a IA.'}`);
+      aiMessages.pop(); // permite tentar de novo sem duplicar histórico
+    } else {
+      typing.innerHTML = aiRenderMd(data.reply || '');
+      aiMessages.push({ role: 'assistant', content: data.reply || '' });
+    }
+  } catch {
+    typing.innerHTML = aiRenderMd('⚠️ Falha de conexão. Tente novamente.');
+    aiMessages.pop();
+  } finally {
+    aiBusy = false;
+    sendBtn.disabled = false;
+    const wrap = document.getElementById('ai-messages');
+    wrap.scrollTop = wrap.scrollHeight;
+    input.focus();
+  }
+}
+
+document.getElementById('ai-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  aiSend(document.getElementById('ai-input').value);
+});
+
+document.querySelectorAll('#ai-suggestions .ai-chip').forEach((chip) => {
+  chip.addEventListener('click', () => aiSend(chip.textContent));
 });
 
 // Init

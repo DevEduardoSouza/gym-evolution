@@ -44,6 +44,9 @@
         <button class="nav-btn" data-tab="treino">
           <span class="nav-icon" data-icon="calendar"></span><span class="nav-label">Frequência</span>
         </button>
+        <button class="nav-btn" data-tab="ia">
+          <span class="nav-icon" data-icon="spark"></span><span class="nav-label">Coach IA</span>
+        </button>
         <button class="nav-btn" data-tab="avisos">
           <span class="nav-icon" data-icon="bell"></span><span class="nav-label">Notificações</span>
           <span class="nav-badge" id="notif-badge" hidden>0</span>
@@ -435,6 +438,26 @@
         </div>
         <div id="day-exercises" class="day-exercises"></div>
         <p id="day-empty" class="empty-msg">Dia livre! Adicione exercícios da biblioteca para montar o treino.</p>
+      </div>
+    </div>
+
+    <div id="tab-ia" class="tab-panel">
+      <div class="hoje-card ai-card">
+        <div class="hoje-card-head">
+          <h3><span data-icon="spark"></span> Coach IA</h3>
+          <span class="table-sub">Insights personalizados com base nos seus dados</span>
+        </div>
+        <div id="ai-messages" class="ai-messages"></div>
+        <div id="ai-suggestions" class="ai-suggestions">
+          <button type="button" class="ai-chip">Como está minha evolução?</button>
+          <button type="button" class="ai-chip">O que devo melhorar no treino?</button>
+          <button type="button" class="ai-chip">Minha dieta está boa?</button>
+          <button type="button" class="ai-chip">Analise minha progressão de carga</button>
+        </div>
+        <form id="ai-form" class="ai-input-row" autocomplete="off">
+          <input id="ai-input" type="text" maxlength="2000" placeholder="Pergunte sobre seus treinos, dieta, evolução..." />
+          <button type="submit" id="ai-send" class="btn-primary ai-send-btn" title="Enviar"><span data-icon="send"></span></button>
+        </form>
       </div>
     </div>
 

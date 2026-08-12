@@ -4,6 +4,19 @@ const path = require('path');
 const { db, ensureUserRows, normalizeFoodName } = require('./database');
 const { hashPassword, verifyPassword } = require('./auth');
 
+// Carrega o .env sem depender de pacote externo (variáveis já definidas têm prioridade)
+(function loadDotEnv() {
+  try {
+    const raw = require('fs').readFileSync(path.join(__dirname, '.env'), 'utf8');
+    raw.split(/\r?\n/).forEach((line) => {
+      const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+      if (m && process.env[m[1]] === undefined) {
+        process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
+      }
+    });
+  } catch {}
+})();
+
 const app = express();
 const PORT = process.env.PORT || 3010;
 
@@ -1463,6 +1476,199 @@ app.get('/api/wrapped/today', (req, res) => {
     aguaL: +(aguaMl / 1000).toFixed(1),
     level: g.level,
   });
+});
+
+// ======== COACH IA (insights via OpenAI) ========
+
+const WEEKDAYS_PT = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'];
+
+function fmtNum(n, dec = 1) {
+  return n === null || n === undefined ? '?' : (+n).toFixed(dec).replace(/\.0$/, '');
+}
+
+// Monta um resumo em texto de TODOS os dados do usuário para servir de contexto à IA
+function buildAiContext(uid) {
+  const daysAgo = (n) => {
+    const d = new Date();
+    d.setDate(d.getDate() - n);
+    return d.toLocaleDateString('en-CA');
+  };
+  const today = new Date().toLocaleDateString('en-CA');
+  const lines = [];
+
+  const user = db.prepare('SELECT username, created_at FROM users WHERE id = ?').get(uid);
+  const profile = db.prepare('SELECT * FROM profile WHERE user_id = ?').get(uid) || {};
+  lines.push(`Data de hoje: ${today}`);
+  lines.push(`Usuário: ${user ? user.username : '?'} (cadastrado em ${user ? user.created_at : '?'})`);
+  const perfilBits = [];
+  if (profile.sexo) perfilBits.push(`sexo ${profile.sexo}`);
+  if (profile.idade) perfilBits.push(`${profile.idade} anos`);
+  if (profile.altura) perfilBits.push(`${profile.altura} cm`);
+  if (profile.freq) perfilBits.push(`treina ${profile.freq}x/semana`);
+  if (profile.peso_meta) perfilBits.push(`meta de peso ${profile.peso_meta} kg`);
+  if (profile.rotina) perfilBits.push(`rotina: ${profile.rotina}`);
+  if (perfilBits.length) lines.push(`Perfil: ${perfilBits.join(', ')}`);
+
+  // Medições corporais: primeira, última e evolução
+  const meas = db.prepare('SELECT * FROM measurements WHERE user_id = ? ORDER BY date ASC').all(uid);
+  if (meas.length) {
+    const first = meas[0];
+    const last = meas[meas.length - 1];
+    lines.push(`\nMedições corporais (${meas.length} registros, de ${first.date} a ${last.date}):`);
+    const fields = [
+      ['peso', 'Peso (kg)'], ['biceps_contraido', 'Bíceps contraído'], ['antebraco', 'Antebraço'],
+      ['ombro_bustos', 'Ombros'], ['peito', 'Peito'], ['cintura_umbigo', 'Cintura'],
+      ['coxa_superior', 'Coxa'], ['panturrilha', 'Panturrilha'],
+    ];
+    fields.forEach(([k, label]) => {
+      if (last[k] === null || last[k] === undefined) return;
+      const delta = first[k] !== null && first[k] !== undefined ? (last[k] - first[k]) : null;
+      lines.push(`- ${label}: ${fmtNum(last[k])}${delta !== null ? ` (${delta >= 0 ? '+' : ''}${fmtNum(delta)} desde o início)` : ''}`);
+    });
+    const pesos = meas.filter(m => m.peso).slice(-5);
+    if (pesos.length > 1) {
+      lines.push(`- Últimos pesos: ${pesos.map(m => `${m.date}: ${fmtNum(m.peso)} kg`).join('; ')}`);
+    }
+  } else {
+    lines.push('\nSem medições corporais registradas.');
+  }
+
+  // Gamificação e frequência
+  const g = computeGami(uid);
+  lines.push(`\nGamificação: nível ${g.level}, ${g.xp} XP, ${g.totalExercises} exercícios concluídos, ${g.completeDays} dias de treino completos.`);
+
+  const t30 = db.prepare(
+    'SELECT COUNT(*) n, COALESCE(SUM(musculacao),0) m, COALESCE(SUM(corrida),0) c, AVG(rating) r FROM treino WHERE user_id = ? AND date >= ?'
+  ).get(uid, daysAgo(30));
+  if (t30.n) {
+    lines.push(`Últimos 30 dias: ${t30.n} dias de treino (${t30.m} musculação, ${t30.c} corrida), nota média ${fmtNum(t30.r)}/5.`);
+  }
+
+  // Plano semanal fixo
+  const plan = db.prepare(`
+    SELECT p.weekday, p.scheme, p.current_weight, e.name
+    FROM plan_items p JOIN exercise_library e ON e.id = p.exercise_id
+    WHERE p.user_id = ? ORDER BY p.weekday, p.position
+  `).all(uid);
+  if (plan.length) {
+    lines.push('\nPlano semanal de treino:');
+    for (let wd = 0; wd < 7; wd++) {
+      const items = plan.filter(p => p.weekday === wd);
+      if (!items.length) continue;
+      lines.push(`- ${WEEKDAYS_PT[wd]}: ${items.map(i =>
+        `${i.name}${i.scheme ? ` (${i.scheme})` : ''}${i.current_weight ? ` @ ${fmtNum(i.current_weight)} kg` : ''}`
+      ).join(', ')}`);
+    }
+  }
+
+  // Progressão de carga por exercício
+  const prog = db.prepare(`
+    SELECT exercise, COUNT(*) n, MIN(date) first_date, MAX(date) last_date, MAX(weight) max_weight,
+      (SELECT weight FROM progressao_carga p2 WHERE p2.user_id = p1.user_id AND p2.exercise = p1.exercise ORDER BY date ASC, id ASC LIMIT 1) first_weight,
+      (SELECT weight FROM progressao_carga p2 WHERE p2.user_id = p1.user_id AND p2.exercise = p1.exercise ORDER BY date DESC, id DESC LIMIT 1) last_weight
+    FROM progressao_carga p1 WHERE user_id = ?
+    GROUP BY exercise ORDER BY last_date DESC LIMIT 15
+  `).all(uid);
+  if (prog.length) {
+    lines.push('\nProgressão de carga (por exercício, mais recentes primeiro):');
+    prog.forEach(p => {
+      lines.push(`- ${p.exercise}: ${fmtNum(p.first_weight)} kg (${p.first_date}) → ${fmtNum(p.last_weight)} kg (${p.last_date}), recorde ${fmtNum(p.max_weight)} kg, ${p.n} registros`);
+    });
+  }
+
+  // Água (últimos 7 dias)
+  const wcfg = db.prepare('SELECT * FROM water_config WHERE user_id = ?').get(uid) || { bottle_size_ml: 500, daily_goal_ml: 3000 };
+  const w7 = db.prepare(
+    'SELECT COUNT(*) days, COALESCE(SUM(bottles),0) b FROM water_intake WHERE user_id = ? AND date >= ?'
+  ).get(uid, daysAgo(7));
+  if (w7.days) {
+    const avgMl = (w7.b * wcfg.bottle_size_ml) / w7.days;
+    lines.push(`\nÁgua: meta diária ${wcfg.daily_goal_ml} ml; média de ${Math.round(avgMl)} ml/dia nos últimos 7 dias (${w7.days} dias registrados).`);
+  }
+
+  // Dieta (últimos 7 dias)
+  const dcfg = db.prepare('SELECT * FROM diet_config WHERE user_id = ?').get(uid);
+  const d7 = db.prepare(`
+    SELECT COUNT(DISTINCT m.date) days,
+      COALESCE(SUM(f.kcal * m.grams / 100), 0) kcal,
+      COALESCE(SUM(f.protein_g * m.grams / 100), 0) prot,
+      COALESCE(SUM(f.carb_g * m.grams / 100), 0) carb,
+      COALESCE(SUM(f.fat_g * m.grams / 100), 0) fat
+    FROM meal_log m JOIN food_library f ON f.id = m.food_id
+    WHERE m.user_id = ? AND m.date >= ?
+  `).get(uid, daysAgo(7));
+  if (dcfg) {
+    lines.push(`\nDieta: meta ${dcfg.kcal_goal} kcal e ${dcfg.protein_goal} g de proteína por dia.`);
+  }
+  if (d7 && d7.days) {
+    lines.push(`Últimos 7 dias (${d7.days} dias registrados): média de ${Math.round(d7.kcal / d7.days)} kcal, ${Math.round(d7.prot / d7.days)} g proteína, ${Math.round(d7.carb / d7.days)} g carboidrato, ${Math.round(d7.fat / d7.days)} g gordura por dia.`);
+  }
+
+  return lines.join('\n');
+}
+
+app.post('/api/insights', async (req, res) => {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return res.status(503).json({ error: 'IA não configurada: defina OPENAI_API_KEY no .env do servidor.' });
+  }
+
+  // Histórico vindo do cliente, com limites de tamanho
+  const history = Array.isArray(req.body && req.body.messages) ? req.body.messages : [];
+  const messages = history
+    .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
+    .slice(-12)
+    .map(m => ({ role: m.role, content: m.content.slice(0, 4000) }));
+  if (!messages.length || messages[messages.length - 1].role !== 'user') {
+    return res.status(400).json({ error: 'Envie ao menos uma mensagem.' });
+  }
+
+  const system = [
+    'Você é o Coach IA do Gym Evolution, um app de acompanhamento de treino, dieta e evolução corporal.',
+    'Responda sempre em português do Brasil, de forma direta, motivadora e prática.',
+    'Seja BREVE: responda em no máximo 4-5 frases curtas (ou uma lista de até 4 itens). Vá direto ao ponto, sem introduções nem despedidas.',
+    'Só se aprofunde se o usuário pedir explicitamente mais detalhes.',
+    'Use APENAS os dados do usuário abaixo para gerar insights personalizados (evolução, pontos fortes, o que melhorar).',
+    'Se faltar algum dado, diga em uma frase o que o usuário pode começar a registrar no app.',
+    'Não invente números que não estão no contexto. Use negrito só nos números-chave.',
+    'Você não substitui médico ou nutricionista; em temas de saúde sensíveis, recomende um profissional.',
+    '',
+    '===== DADOS DO USUÁRIO =====',
+    buildAiContext(req.session.userId),
+  ].join('\n');
+
+  const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+  // Modelos novos (gpt-5*, o*) usam max_completion_tokens e não aceitam temperature customizada
+  const isNewGen = /^(gpt-5|o\d)/.test(model);
+  const payload = {
+    model,
+    messages: [{ role: 'system', content: system }, ...messages],
+  };
+  if (isNewGen) payload.max_completion_tokens = 450;
+  else { payload.max_tokens = 450; payload.temperature = 0.7; }
+
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 60000);
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify(payload),
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    const data = await r.json();
+    if (!r.ok) {
+      const msg = (data && data.error && data.error.message) || 'Erro na API da OpenAI.';
+      console.error('OpenAI error:', msg);
+      return res.status(502).json({ error: msg });
+    }
+    res.json({ reply: data.choices[0].message.content });
+  } catch (e) {
+    console.error('OpenAI request failed:', e.message);
+    const msg = e.name === 'AbortError' ? 'A IA demorou demais para responder. Tente de novo.' : 'Falha ao consultar a IA. Verifique a conexão do servidor.';
+    res.status(502).json({ error: msg });
+  }
 });
 
 app.listen(PORT, () => {
