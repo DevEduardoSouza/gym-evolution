@@ -852,6 +852,8 @@ app.get('/api/photos', (req, res) => {
   res.json(rows);
 });
 
+const PHOTO_SLOTS = ['frente', 'costas', 'lado_esq', 'lado_dir', 'frente_contraido', 'costas_contraido', ''];
+
 app.post('/api/photos', (req, res) => {
   const { date, label, image } = req.body;
   if (!image || !String(image).startsWith('data:image/')) {
@@ -861,10 +863,33 @@ app.post('/api/photos', (req, res) => {
     return res.status(400).json({ error: 'Imagem muito grande' });
   }
   const d = date || new Date().toLocaleDateString('en-CA');
+  const slot = String(label || '');
+  if (!PHOTO_SLOTS.includes(slot)) return res.status(400).json({ error: 'Posição inválida' });
+  // Um slot por data: enviar de novo substitui a foto anterior
+  if (slot) {
+    db.prepare('DELETE FROM progress_photos WHERE user_id = ? AND date = ? AND label = ?')
+      .run(req.session.userId, d, slot);
+  }
   const result = db.prepare(
     'INSERT INTO progress_photos (user_id, date, label, image) VALUES (?, ?, ?, ?)'
-  ).run(req.session.userId, d, String(label || ''), image);
+  ).run(req.session.userId, d, slot, image);
   res.status(201).json(db.prepare('SELECT id, date, label, image FROM progress_photos WHERE id = ?').get(result.lastInsertRowid));
+});
+
+// Reclassificar/mover foto (posição e/ou data)
+app.patch('/api/photos/:id', (req, res) => {
+  const cur = db.prepare('SELECT id, date, label FROM progress_photos WHERE id = ? AND user_id = ?')
+    .get(req.params.id, req.session.userId);
+  if (!cur) return res.status(404).json({ error: 'Foto não encontrada' });
+  const label = req.body.label !== undefined ? String(req.body.label) : cur.label;
+  const date = req.body.date || cur.date;
+  if (!PHOTO_SLOTS.includes(label)) return res.status(400).json({ error: 'Posição inválida' });
+  if (label) {
+    db.prepare('DELETE FROM progress_photos WHERE user_id = ? AND date = ? AND label = ? AND id != ?')
+      .run(req.session.userId, date, label, cur.id);
+  }
+  db.prepare('UPDATE progress_photos SET label = ?, date = ? WHERE id = ?').run(label, date, cur.id);
+  res.json(db.prepare('SELECT id, date, label, image FROM progress_photos WHERE id = ?').get(cur.id));
 });
 
 app.delete('/api/photos/:id', (req, res) => {

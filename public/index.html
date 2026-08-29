@@ -198,17 +198,20 @@
       <div class="table-wrapper photos-card">
         <div class="table-bar">
           <div>
-            <h3>Fotos de Progresso</h3>
-            <p class="table-sub" id="photos-sub">Registre seu shape e compare a evolução</p>
+            <h3>Shape Check</h3>
+            <p class="table-sub" id="photos-sub">Fotos por posição — compare a mesma pose ao longo do tempo</p>
           </div>
-          <button id="btn-photo-add" class="btn-primary btn-sm"><span data-icon="plus"></span> Foto</button>
+          <div class="photos-actions">
+            <button id="btn-photo-compare" class="btn-secondary btn-sm" style="display:none"><span data-icon="chart"></span> Comparar</button>
+            <button id="btn-photo-add" class="btn-primary btn-sm"><span data-icon="plus"></span> Novo registro</button>
+          </div>
         </div>
         <div class="photos-body">
-          <div id="photos-grid" class="photos-grid"></div>
-          <p id="photos-empty" class="empty-msg">Nenhuma foto ainda. Tire uma foto de frente hoje — daqui a 3 meses você vai agradecer.</p>
-          <p class="profile-hint" id="photos-hint" style="display:none">Toque em duas fotos para comparar lado a lado</p>
+          <div id="photos-sessions"></div>
+          <p id="photos-empty" class="empty-msg">Nenhum registro ainda. Clique em "Novo registro", tire as fotos de frente, costas e lados — daqui a 3 meses você vai agradecer.</p>
         </div>
         <input type="file" id="photo-input" accept="image/*" hidden>
+        <input type="file" id="photo-input-cam" accept="image/*" capture="environment" hidden>
       </div>
     </div>
 
@@ -698,11 +701,47 @@
     </div>
   </div>
 
+  <!-- Modal: data do registro de fotos -->
+  <div id="modal-photo-date" class="modal-overlay hidden">
+    <div class="modal modal-small">
+      <h2>Data do registro</h2>
+      <div class="form-group">
+        <label for="photo-date-input">Todas as fotos deste registro vão para esta data</label>
+        <input type="date" id="photo-date-input">
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn-secondary" id="btn-photo-date-cancel">Cancelar</button>
+        <button type="button" class="btn-primary" id="btn-photo-date-save">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: posição da foto -->
+  <div id="modal-photo-slot" class="modal-overlay hidden">
+    <div class="modal modal-small">
+      <h2>Posição da foto</h2>
+      <div class="slot-pick" id="slot-pick"></div>
+      <div class="form-actions">
+        <button type="button" class="btn-secondary" id="btn-photo-slot-cancel">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal de comparação de fotos -->
   <div id="modal-compare" class="modal-overlay hidden">
     <div class="modal modal-compare">
       <h2>Antes × Depois</h2>
-      <div class="compare-grid">
+      <div class="cmp-slots" id="cmp-slots"></div>
+      <div class="cmp-dates">
+        <select id="cmp-date-a"></select>
+        <span class="cmp-arrow">→</span>
+        <select id="cmp-date-b"></select>
+      </div>
+      <div class="cmp-modes">
+        <button type="button" class="cmp-mode active" data-mode="side">Lado a lado</button>
+        <button type="button" class="cmp-mode" data-mode="slide">Sobrepor</button>
+      </div>
+      <div class="compare-grid" id="cmp-side">
         <figure>
           <img id="cmp-img-a" alt="Foto anterior">
           <figcaption id="cmp-cap-a"></figcaption>
@@ -712,7 +751,16 @@
           <figcaption id="cmp-cap-b"></figcaption>
         </figure>
       </div>
+      <div class="cmp-slide" id="cmp-slide" style="display:none">
+        <div class="cmp-slide-box" id="cmp-slide-box">
+          <img id="cmp-slide-b" alt="Foto recente">
+          <div class="cmp-slide-top" id="cmp-slide-top"><img id="cmp-slide-a" alt="Foto anterior"></div>
+          <div class="cmp-slide-handle" id="cmp-slide-handle"></div>
+        </div>
+        <input type="range" id="cmp-range" min="0" max="100" value="50">
+      </div>
       <p class="profile-hint" id="cmp-delta"></p>
+      <p class="empty-msg" id="cmp-missing" style="display:none">Falta foto dessa posição em uma das datas.</p>
       <div class="form-actions">
         <button type="button" class="btn-primary" id="btn-compare-close">Fechar</button>
       </div>

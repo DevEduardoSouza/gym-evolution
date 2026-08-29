@@ -2786,86 +2786,250 @@ function notify(title, body) {
   setInterval(checkReminders, 60 * 1000);
 })();
 
-// ======== FOTOS DE PROGRESSO ========
+// ======== FOTOS DE PROGRESSO (Shape Check) ========
+const PHOTO_SLOTS = [
+  { key: 'frente', name: 'Frente', icon: '🧍', hint: 'braços relaxados' },
+  { key: 'costas', name: 'Costas', icon: '🔙', hint: 'mesma distância' },
+  { key: 'lado_esq', name: 'Lado E', icon: '◀', hint: 'perfil, postura neutra' },
+  { key: 'lado_dir', name: 'Lado D', icon: '▶', hint: 'perfil, postura neutra' },
+  { key: 'frente_contraido', name: 'Frente contraído', icon: '💪', hint: 'duplo bíceps', optional: true },
+  { key: 'costas_contraido', name: 'Costas contraído', icon: '💪', hint: 'duplo bíceps de costas', optional: true },
+];
+const MAIN_SLOTS = PHOTO_SLOTS.filter(s => !s.optional);
 let photosList = [];
-let photoSel = [];
+let photoOpenDate = null;     // registro expandido
+let photoDraftDates = [];     // registros novos ainda sem foto
+let photoUploadTarget = null; // { date, label }
+let cmpSlot = 'frente';
+
+function photoSessions() {
+  const map = {};
+  photoDraftDates.forEach(d => { map[d] = []; });
+  photosList.forEach(p => { (map[p.date] = map[p.date] || []).push(p); });
+  return Object.keys(map).sort((a, b) => b.localeCompare(a)).map(date => ({ date, photos: map[date] }));
+}
+
+function measurementOn(date) {
+  return (measurements || []).find(m => m.date === date) || null;
+}
 
 async function loadPhotos() {
   photosList = await api('GET', '/api/photos');
+  if (!measurements.length) { try { measurements = await api('GET', '/api/measurements'); } catch (_) {} }
+  photoDraftDates = photoDraftDates.filter(d => !photosList.some(p => p.date === d));
   renderPhotos();
 }
 
 function renderPhotos() {
-  const grid = document.getElementById('photos-grid');
+  const wrap = document.getElementById('photos-sessions');
   const empty = document.getElementById('photos-empty');
-  const hint = document.getElementById('photos-hint');
   const sub = document.getElementById('photos-sub');
-  empty.style.display = photosList.length ? 'none' : '';
-  hint.style.display = photosList.length >= 2 ? '' : 'none';
-  sub.textContent = photosList.length
-    ? `${photosList.length} ${photosList.length === 1 ? 'foto' : 'fotos'}`
-    : 'Registre seu shape e compare a evolução';
-
-  grid.innerHTML = '';
-  photosList.forEach(p => {
-    const item = document.createElement('div');
-    item.className = 'photo-item' + (photoSel.includes(p.id) ? ' sel' : '');
-    item.innerHTML = `
-      <img src="${p.image}" alt="Foto de ${formatShortDate(p.date)}" loading="lazy">
-      <span class="photo-date">${formatShortDate(p.date)}</span>
-      <button class="photo-del" title="Excluir foto">&#10005;</button>
-    `;
-    item.addEventListener('click', ev => {
-      if (ev.target.closest('.photo-del')) return;
-      if (photoSel.includes(p.id)) {
-        photoSel = photoSel.filter(x => x !== p.id);
-      } else {
-        photoSel.push(p.id);
-        if (photoSel.length > 2) photoSel.shift();
-      }
+  const sessions = photoSessions();
+  const realDates = [...new Set(photosList.map(p => p.date))];
+  empty.style.display = sessions.length ? 'none' : '';
+  document.getElementById('btn-photo-compare').style.display = realDates.length >= 2 ? '' : 'none';
+  if (realDates.length) {
+    const last = realDates.sort().slice(-1)[0];
+    const days = Math.round((new Date(todayStr()) - new Date(last)) / 86400000);
+    sub.textContent = `${realDates.length} ${realDates.length === 1 ? 'registro' : 'registros'} · último ${days <= 0 ? 'hoje' : 'há ' + days + ' dias'}`
+      + (days >= 30 ? ' — hora do shape check 📸' : '');
+  } else {
+    sub.textContent = 'Fotos por posição — compare a mesma pose ao longo do tempo';
+  }
+  if (photoOpenDate === null && sessions.length) photoOpenDate = sessions[0].date;
+  wrap.innerHTML = '';
+  sessions.forEach(sess => {
+    const open = sess.date === photoOpenDate;
+    const filled = MAIN_SLOTS.filter(s => sess.photos.some(p => p.label === s.key)).length;
+    const unl = sess.photos.filter(p => !p.label).length;
+    const m = measurementOn(sess.date);
+    const el = document.createElement('div');
+    el.className = 'photo-session' + (open ? ' open' : '');
+    el.innerHTML = `
+      <button class="ps-head" type="button">
+        <span class="ps-date">📅 ${formatShortDate(sess.date)}</span>
+        <span class="ps-meta">${filled}/${MAIN_SLOTS.length} fotos${unl ? ` · ${unl} sem posição` : ''}${m && m.peso ? ` · ${m.peso} kg` : ''}</span>
+        <span class="ps-chev">▸</span>
+      </button>
+      <div class="ps-body"></div>`;
+    el.querySelector('.ps-head').addEventListener('click', () => {
+      photoOpenDate = open ? '' : sess.date;
       renderPhotos();
-      if (photoSel.length === 2) openCompare();
     });
-    item.querySelector('.photo-del').addEventListener('click', async () => {
+    if (open) {
+      const body = el.querySelector('.ps-body');
+      const grid = document.createElement('div');
+      grid.className = 'photos-grid';
+      const showOptional = sess.photos.some(p => p.label && p.label.endsWith('_contraido'));
+      PHOTO_SLOTS.forEach(slot => {
+        const photo = sess.photos.find(p => p.label === slot.key);
+        if (slot.optional && !photo && !showOptional) return;
+        grid.appendChild(slotCard(sess.date, slot, photo));
+      });
+      sess.photos.filter(p => !p.label).forEach(p => grid.appendChild(slotCard(sess.date, null, p)));
+      const tools = document.createElement('div');
+      tools.className = 'ps-tools';
+      const missing = MAIN_SLOTS.filter(sl => !sess.photos.some(p => p.label === sl.key));
+      tools.innerHTML = `
+        <button type="button" class="btn-secondary btn-sm ps-seq" ${missing.length ? '' : 'disabled'}>📷 Tirar ${missing.length === MAIN_SLOTS.length ? 'as 4 fotos' : missing.length + (missing.length === 1 ? ' que falta' : ' que faltam')} em sequência</button>
+        <button type="button" class="btn-secondary btn-sm ps-edit-date">✏️ Data</button>`;
+      tools.querySelector('.ps-seq').addEventListener('click', () => startSequence(sess.date));
+      tools.querySelector('.ps-edit-date').addEventListener('click', () => openDateModal(sess.date));
+      body.appendChild(tools);
+      body.appendChild(grid);
+      const foot = document.createElement('div');
+      foot.className = 'ps-foot';
+      const parts = [];
+      if (m) {
+        if (m.peso) parts.push(`peso ${m.peso} kg`);
+        if (m.cintura_umbigo) parts.push(`cintura ${m.cintura_umbigo} cm`);
+        if (m.peito) parts.push(`peito ${m.peito} cm`);
+      }
+      foot.innerHTML = `<span class="profile-hint">${parts.length ? parts.join(' · ') : 'Sem medição nesta data'}</span>`;
+      if (!showOptional) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'link-btn'; b.textContent = '+ poses contraídas';
+        b.addEventListener('click', () => {
+          PHOTO_SLOTS.filter(s => s.optional).forEach(slot => {
+            if (!grid.querySelector(`[data-slot="${slot.key}"]`)) grid.appendChild(slotCard(sess.date, slot, null));
+          });
+          b.remove();
+        });
+        foot.appendChild(b);
+      }
+      body.appendChild(foot);
+    }
+    wrap.appendChild(el);
+  });
+}
+
+function slotCard(date, slot, photo) {
+  const item = document.createElement('div');
+  item.className = 'photo-item' + (photo ? '' : ' empty') + (slot ? '' : ' unlabeled');
+  if (slot) item.dataset.slot = slot.key;
+  if (photo) {
+    item.innerHTML = `
+      <img src="${photo.image}" alt="${slot ? slot.name : 'Foto'} ${formatShortDate(date)}" loading="lazy">
+      <span class="photo-date">${slot ? slot.icon + ' ' + slot.name : '❓ Sem posição'}</span>
+      <div class="photo-tools">
+        <button class="photo-tool photo-move" title="Definir posição">⇄</button>
+        <button class="photo-tool photo-replace" title="Substituir foto">⟳</button>
+        <button class="photo-tool photo-del" title="Excluir foto">✕</button>
+      </div>`;
+    item.querySelector('.photo-del').addEventListener('click', async ev => {
+      ev.stopPropagation();
       if (!confirm('Excluir esta foto?')) return;
-      await api('DELETE', `/api/photos/${p.id}`);
-      photoSel = photoSel.filter(x => x !== p.id);
+      await api('DELETE', `/api/photos/${photo.id}`);
       loadPhotos();
     });
-    grid.appendChild(item);
+    item.querySelector('.photo-replace').addEventListener('click', ev => {
+      ev.stopPropagation();
+      photoUploadTarget = { date, label: slot ? slot.key : '' };
+      document.getElementById('photo-input').click();
+    });
+    item.querySelector('.photo-move').addEventListener('click', ev => {
+      ev.stopPropagation();
+      openSlotPicker(photo);
+    });
+    item.addEventListener('click', () => openLightbox(photo, slot));
+  } else {
+    item.innerHTML = `
+      <span class="slot-icon">${slot.icon}</span>
+      <span class="slot-name">${slot.name}</span>
+      <span class="slot-hint">${slot.hint}</span>
+      <span class="slot-plus">+</span>`;
+    item.addEventListener('click', () => {
+      photoUploadTarget = { date, label: slot.key };
+      document.getElementById('photo-input').click();
+    });
+  }
+  return item;
+}
+
+// Reclassificar foto: escolher posição (modal)
+const modalSlot = document.getElementById('modal-photo-slot');
+document.getElementById('btn-photo-slot-cancel').addEventListener('click', () => modalSlot.classList.add('hidden'));
+modalSlot.addEventListener('click', e => { if (e.target === modalSlot) modalSlot.classList.add('hidden'); });
+function openSlotPicker(photo) {
+  const box = document.getElementById('slot-pick');
+  box.innerHTML = '';
+  PHOTO_SLOTS.forEach(sl => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'slot-pick-btn' + (sl.key === photo.label ? ' active' : '');
+    b.innerHTML = `<span class="slot-icon">${sl.icon}</span><span>${sl.name}</span>`;
+    b.addEventListener('click', async () => {
+      modalSlot.classList.add('hidden');
+      await api('PATCH', `/api/photos/${photo.id}`, { label: sl.key });
+      loadPhotos();
+    });
+    box.appendChild(b);
   });
-  animateIn(grid.children, 0.03);
+  modalSlot.classList.remove('hidden');
 }
 
-function openCompare() {
-  const pair = photosList
-    .filter(p => photoSel.includes(p.id))
-    .sort((a, b) => a.date.localeCompare(b.date));
-  if (pair.length < 2) return;
-  document.getElementById('cmp-img-a').src = pair[0].image;
-  document.getElementById('cmp-img-b').src = pair[1].image;
-  document.getElementById('cmp-cap-a').textContent = formatShortDate(pair[0].date);
-  document.getElementById('cmp-cap-b').textContent = formatShortDate(pair[1].date);
-  const days = Math.round((new Date(pair[1].date) - new Date(pair[0].date)) / 86400000);
-  document.getElementById('cmp-delta').textContent = days > 0
-    ? `${days} dias de evolução entre as fotos 💪` : '';
-  document.getElementById('modal-compare').classList.remove('hidden');
+// Data do registro (modal): mover todas as fotos do dia
+const modalDate = document.getElementById('modal-photo-date');
+let dateEditing = null;
+function openDateModal(date) {
+  dateEditing = date;
+  document.getElementById('photo-date-input').value = date;
+  modalDate.classList.remove('hidden');
 }
-
-const modalCompare = document.getElementById('modal-compare');
-document.getElementById('btn-compare-close').addEventListener('click', () => modalCompare.classList.add('hidden'));
-modalCompare.addEventListener('click', e => { if (e.target === modalCompare) modalCompare.classList.add('hidden'); });
-
-document.getElementById('btn-photo-add').addEventListener('click', () => {
-  document.getElementById('photo-input').click();
+document.getElementById('btn-photo-date-cancel').addEventListener('click', () => modalDate.classList.add('hidden'));
+modalDate.addEventListener('click', e => { if (e.target === modalDate) modalDate.classList.add('hidden'); });
+document.getElementById('btn-photo-date-save').addEventListener('click', async () => {
+  const nd = document.getElementById('photo-date-input').value;
+  if (!nd || nd === dateEditing) { modalDate.classList.add('hidden'); return; }
+  const ph = photosList.filter(p => p.date === dateEditing);
+  for (const p of ph) await api('PATCH', `/api/photos/${p.id}`, { date: nd });
+  photoDraftDates = photoDraftDates.map(d => d === dateEditing ? nd : d);
+  photoOpenDate = nd;
+  modalDate.classList.add('hidden');
+  toastMsg('Data alterada');
+  loadPhotos();
 });
 
-document.getElementById('photo-input').addEventListener('change', e => {
+// Sequência: abre a câmera slot após slot
+let seqQueue = [];
+function startSequence(date) {
+  const have = photosList.filter(p => p.date === date).map(p => p.label);
+  seqQueue = MAIN_SLOTS.filter(sl => !have.includes(sl.key)).map(sl => ({ date, label: sl.key }));
+  nextInSequence();
+}
+function nextInSequence() {
+  if (!seqQueue.length) { toastMsg('Registro completo! 🔥'); return; }
+  photoUploadTarget = seqQueue.shift();
+  const sl = PHOTO_SLOTS.find(x => x.key === photoUploadTarget.label);
+  toastMsg(`${sl.icon} Agora: ${sl.name} — ${sl.hint}`);
+  document.getElementById('photo-input-cam').click();
+}
+
+function openLightbox(photo, slot) {
+  const ov = document.createElement('div');
+  ov.className = 'modal-overlay photo-lightbox';
+  ov.innerHTML = `<img src="${photo.image}" alt=""><span class="photo-date">${slot ? slot.icon + ' ' + slot.name + ' · ' : ''}${formatShortDate(photo.date)}</span>`;
+  ov.addEventListener('click', () => ov.remove());
+  document.body.appendChild(ov);
+}
+
+// ---- Novo registro
+document.getElementById('btn-photo-add').addEventListener('click', () => {
+  const d = todayStr();
+  photoOpenDate = d;
+  if (!photosList.some(p => p.date === d) && !photoDraftDates.includes(d)) photoDraftDates.push(d);
+  renderPhotos();
+  const el = document.querySelector('.photo-session.open');
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
+
+function onPhotoFile(e) {
   const file = e.target.files && e.target.files[0];
-  if (!file) return;
+  const fromCam = e.target.id === 'photo-input-cam';
+  if (!file) { if (fromCam) seqQueue = []; return; }
+  const target = photoUploadTarget || { date: todayStr(), label: '' };
   const img = new Image();
   img.onload = async () => {
-    // Reduz para no máximo 900px no lado maior
     const MAX = 900;
     const scale = Math.min(1, MAX / Math.max(img.width, img.height));
     const canvas = document.createElement('canvas');
@@ -2874,13 +3038,89 @@ document.getElementById('photo-input').addEventListener('change', e => {
     canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
     const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
     URL.revokeObjectURL(img.src);
-    await api('POST', '/api/photos', { date: todayStr(), image: dataUrl });
-    toastMsg('Foto registrada! 📸');
-    loadPhotos();
+    await api('POST', '/api/photos', { date: target.date, label: target.label, image: dataUrl });
+    photoUploadTarget = null;
+    photoOpenDate = target.date;
+    await loadPhotos();
+    if (fromCam && seqQueue.length) nextInSequence();
+    else toastMsg(fromCam && !seqQueue.length ? 'Registro completo! 🔥' : 'Foto registrada! 📸');
   };
   img.src = URL.createObjectURL(file);
   e.target.value = '';
+}
+document.getElementById('photo-input').addEventListener('change', onPhotoFile);
+document.getElementById('photo-input-cam').addEventListener('change', onPhotoFile);
+
+// ---- Comparação por posição
+const modalCompare = document.getElementById('modal-compare');
+document.getElementById('btn-photo-compare').addEventListener('click', () => openCompare());
+document.getElementById('btn-compare-close').addEventListener('click', () => modalCompare.classList.add('hidden'));
+modalCompare.addEventListener('click', e => { if (e.target === modalCompare) modalCompare.classList.add('hidden'); });
+document.getElementById('cmp-date-a').addEventListener('change', renderCompare);
+document.getElementById('cmp-date-b').addEventListener('change', renderCompare);
+document.querySelectorAll('.cmp-mode').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('.cmp-mode').forEach(x => x.classList.toggle('active', x === b));
+  document.getElementById('cmp-side').style.display = b.dataset.mode === 'side' ? '' : 'none';
+  document.getElementById('cmp-slide').style.display = b.dataset.mode === 'slide' ? '' : 'none';
+}));
+document.getElementById('cmp-range').addEventListener('input', e => {
+  const v = e.target.value;
+  document.getElementById('cmp-slide-a').style.clipPath = `inset(0 ${100 - v}% 0 0)`;
+  document.getElementById('cmp-slide-handle').style.left = v + '%';
 });
+
+function openCompare() {
+  const dates = [...new Set(photosList.map(p => p.date))].sort();
+  if (dates.length < 2) return;
+  const selA = document.getElementById('cmp-date-a');
+  const selB = document.getElementById('cmp-date-b');
+  selA.innerHTML = selB.innerHTML = dates.map(d => `<option value="${d}">${formatShortDate(d)}</option>`).join('');
+  selA.value = dates[0];
+  selB.value = dates[dates.length - 1];
+  if (!photosList.some(p => p.label === cmpSlot)) {
+    const first = PHOTO_SLOTS.find(s => photosList.some(p => p.label === s.key));
+    cmpSlot = first ? first.key : 'frente';
+  }
+  renderCompare();
+  modalCompare.classList.remove('hidden');
+}
+
+function renderCompare() {
+  const dA = document.getElementById('cmp-date-a').value;
+  const dB = document.getElementById('cmp-date-b').value;
+  const slots = document.getElementById('cmp-slots');
+  slots.innerHTML = '';
+  PHOTO_SLOTS.forEach(s => {
+    if (!photosList.some(p => p.label === s.key)) return;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'cmp-chip' + (s.key === cmpSlot ? ' active' : '');
+    b.textContent = s.icon + ' ' + s.name;
+    b.addEventListener('click', () => { cmpSlot = s.key; renderCompare(); });
+    slots.appendChild(b);
+  });
+  const a = photosList.find(p => p.date === dA && p.label === cmpSlot);
+  const b = photosList.find(p => p.date === dB && p.label === cmpSlot);
+  document.getElementById('cmp-missing').style.display = (!a || !b) ? '' : 'none';
+  document.getElementById('cmp-img-a').src = a ? a.image : '';
+  document.getElementById('cmp-img-b').src = b ? b.image : '';
+  document.getElementById('cmp-slide-a').src = a ? a.image : '';
+  document.getElementById('cmp-slide-b').src = b ? b.image : '';
+  document.getElementById('cmp-cap-a').textContent = formatShortDate(dA);
+  document.getElementById('cmp-cap-b').textContent = formatShortDate(dB);
+  const days = Math.round((new Date(dB) - new Date(dA)) / 86400000);
+  const mA = measurementOn(dA), mB = measurementOn(dB);
+  const parts = [];
+  if (days > 0) parts.push(`${days} dias`);
+  const delta = (k, unit) => {
+    if (mA && mB && mA[k] != null && mB[k] != null) {
+      const d = mB[k] - mA[k];
+      parts.push(`${d > 0 ? '+' : ''}${d.toFixed(1)} ${unit}`);
+    }
+  };
+  delta('peso', 'kg'); delta('cintura_umbigo', 'cm cintura'); delta('peito', 'cm peito');
+  document.getElementById('cmp-delta').textContent = parts.length ? parts.join(' · ') + ' 💪' : '';
+}
 
 // ======== NOTIFICAÇÕES (feed interno) ========
 function timeAgo(sqlDate) {
