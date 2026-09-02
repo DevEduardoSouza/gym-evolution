@@ -114,6 +114,7 @@
               <div class="hoje-mini"><span class="hoje-mini-value" id="hoje-streak">0</span><span class="hoje-mini-label"><span data-icon="flame"></span> Sequência</span></div>
               <div class="hoje-mini"><span class="hoje-mini-value" id="hoje-nivel">1</span><span class="hoje-mini-label">Nível</span></div>
               <div class="hoje-mini"><span class="hoje-mini-value" id="hoje-xp">0</span><span class="hoje-mini-label">XP</span></div>
+              <div class="hoje-mini"><span class="hoje-mini-value hoje-kcal" id="hoje-kcal">0</span><span class="hoje-mini-label">🔥 kcal</span></div>
             </div>
           </div>
           <div class="hoje-card hoje-lembretes-card">
@@ -320,6 +321,8 @@
           <div class="report-stat"><b id="rep-prot">0 g</b><span>proteína</span></div>
           <div class="report-stat"><b id="rep-carb">0 g</b><span>carboidrato</span></div>
           <div class="report-stat"><b id="rep-fat">0 g</b><span>gordura</span></div>
+          <div class="report-stat"><b id="rep-burn" class="rep-burn">0</b><span id="rep-burn-lbl">🔥 gasto no treino</span></div>
+          <div class="report-stat"><b id="rep-net">0</b><span title="Consumido menos o gasto estimado no treino">saldo líquido</span></div>
         </div>
         <div class="diet-chart-wrap">
           <div class="diet-chart" id="diet-chart"></div>
@@ -425,6 +428,10 @@
             <span class="stat-value" id="gami-week-pct">0%</span>
             <span class="stat-label">Semana Atual</span>
           </div>
+          <div class="stat-card">
+            <span class="stat-value stat-kcal" id="gami-kcal-week">0</span>
+            <span class="stat-label">kcal na Semana</span>
+          </div>
         </div>
       </div>
 
@@ -440,6 +447,7 @@
         </div>
         <div id="day-exercises" class="day-exercises"></div>
         <p id="day-empty" class="empty-msg">Dia livre! Adicione exercícios da biblioteca para montar o treino.</p>
+        <p id="day-kcal-hint" class="day-kcal-hint" style="display:none"></p>
       </div>
     </div>
 
@@ -789,6 +797,10 @@
         <div class="evoc-stat">
           <span class="evoc-stat-value" id="evoc-ganho">—</span>
           <span class="evoc-stat-label">Evolução</span>
+        </div>
+        <div class="evoc-stat">
+          <span class="evoc-stat-value evoc-kcal" id="evoc-kcal">—</span>
+          <span class="evoc-stat-label">kcal hoje</span>
         </div>
       </div>
       <div class="evoc-filter" id="evoc-filter"></div>

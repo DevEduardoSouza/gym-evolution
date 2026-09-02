@@ -2190,9 +2190,10 @@ th.evo-pickable .header-date {
 
 .gami-stats {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 12px;
 }
+.stat-kcal { color: #ff9f0a; }
 
 /* Week strip */
 .week-strip {
@@ -2585,6 +2586,7 @@ th.evo-pickable .header-date {
 @media (max-width: 900px) {
   .gami-hero { grid-template-columns: 1fr; }
   .gami-stats { grid-template-columns: repeat(2, 1fr); }
+  .gami-stats .stat-card:nth-child(5) { grid-column: span 2; }
 }
 @media (max-width: 700px) {
   .week-strip { gap: 5px; }
@@ -3528,9 +3530,12 @@ body.anim-flip .ex-anim2 .f2 { opacity: 1; }
 
 .evoc-stats {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 10px;
   margin-bottom: 14px;
+}
+@media (max-width: 520px) {
+  .evoc-stats { grid-template-columns: repeat(2, 1fr); }
 }
 .evoc-stat {
   background: #101012;
@@ -3779,7 +3784,8 @@ body.anim-flip .ex-anim2 .f2 { opacity: 1; }
 .hoje-agua-meta { color: var(--faint); font-size: 0.9rem; }
 
 /* Mini stats */
-.hoje-mini-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.hoje-mini-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.hoje-mini-value.hoje-kcal { color: #ff9f0a; }
 .hoje-mini { display: flex; flex-direction: column; align-items: center; gap: 3px; }
 .hoje-mini-value { font-size: 1.4rem; font-weight: 800; color: #fff; letter-spacing: -0.02em; }
 .hoje-mini-label {
@@ -4875,3 +4881,22 @@ button, a, input, select, textarea, label, canvas,
   .ai-card { max-height: none; min-height: 70vh; }
   .ai-msg { max-width: 92%; }
 }
+
+
+/* ======== Calorias gastas (estimativa) ======== */
+.ex-kcal-val {
+  font-size: 0.92rem;
+  font-weight: 800;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ex-kcal-val.has { color: #ff9f0a; }
+.day-kcal-hint {
+  margin: 10px 2px 0;
+  font-size: 0.76rem;
+  color: #8e8e93;
+}
+.evoc-stat-value.evoc-kcal { color: #ff9f0a; }
+.report-stat b.rep-burn { color: #ff9f0a; }
+.report-stat b.rep-net-neg { color: #30d158; }

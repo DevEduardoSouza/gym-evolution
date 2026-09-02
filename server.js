@@ -1,7 +1,8 @@
 const express = require('express');
 const session = require('express-session');
 const path = require('path');
-const { db, ensureUserRows, normalizeFoodName } = require('./database');
+const { db, ensureUserRows, normalizeFoodName, classifyExercise, EX_TIPOS } = require('./database');
+const { estimateExercise } = require('./calories');
 const { hashPassword, verifyPassword } = require('./auth');
 
 // Carrega o .env sem depender de pacote externo (variáveis já definidas têm prioridade)
@@ -557,8 +558,9 @@ app.post('/api/library', (req, res) => {
   const name = String(req.body.name || '').trim();
   const muscle = String(req.body.muscle || '').trim() || 'Outro';
   if (!name) return res.status(400).json({ error: 'Nome do exercício é obrigatório' });
-  const result = db.prepare('INSERT INTO exercise_library (user_id, name, muscle, image1, image2) VALUES (?, ?, ?, ?, ?)')
-    .run(req.session.userId, name, muscle, String(req.body.image1 || ''), String(req.body.image2 || ''));
+  const tipo = EX_TIPOS.includes(req.body.tipo) ? req.body.tipo : classifyExercise(name, muscle);
+  const result = db.prepare('INSERT INTO exercise_library (user_id, name, muscle, image1, image2, tipo) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(req.session.userId, name, muscle, String(req.body.image1 || ''), String(req.body.image2 || ''), tipo);
   res.status(201).json(db.prepare('SELECT * FROM exercise_library WHERE id = ?').get(result.lastInsertRowid));
 });
 
@@ -806,6 +808,111 @@ function computeGami(userId) {
     completeDates,
   };
 }
+
+// ======== CALORIAS GASTAS NO TREINO ========
+
+// Dados da pessoa usados na estimativa: perfil + último peso registrado em Medições
+function personFor(uid) {
+  const profile = db.prepare('SELECT sexo, idade, altura FROM profile WHERE user_id = ?').get(uid) || {};
+  const last = db.prepare('SELECT peso FROM measurements WHERE user_id = ? AND peso > 0 ORDER BY date DESC, id DESC LIMIT 1').get(uid);
+  return {
+    peso: last ? last.peso : 0,
+    sexo: profile.sexo || '',
+    idade: profile.idade || 0,
+    altura: profile.altura || 0,
+  };
+}
+
+// Estimativa do dia: une os exercícios marcados no plano com as séries registradas.
+// Séries reais (progressao_carga) têm prioridade; exercício só marcado usa o esquema do plano.
+function computeCalories(uid, date) {
+  const person = personFor(uid);
+
+  const checked = db.prepare(`
+    SELECT el.name, el.muscle, el.tipo, pi.scheme, pi.current_weight
+    FROM workout_log wl
+    JOIN plan_items pi ON pi.id = wl.plan_item_id
+    JOIN exercise_library el ON el.id = pi.exercise_id
+    WHERE wl.user_id = ? AND wl.date = ?
+    ORDER BY pi.position, pi.id
+  `).all(uid, date);
+
+  const setRows = db.prepare(`
+    SELECT exercise, weight, reps, set_number FROM progressao_carga
+    WHERE user_id = ? AND date = ? AND (set_number >= 1 OR reps > 0)
+    ORDER BY exercise, set_number, id
+  `).all(uid, date);
+  const setsByEx = {};
+  setRows.forEach(r => { (setsByEx[r.exercise] = setsByEx[r.exercise] || []).push({ weight: r.weight, reps: r.reps }); });
+
+  const prStmt = db.prepare('SELECT COALESCE(MAX(weight), 0) w FROM progressao_carga WHERE user_id = ? AND exercise = ? AND date <= ?');
+  const libStmt = db.prepare('SELECT muscle, tipo FROM exercise_library WHERE name = ? AND (user_id IS NULL OR user_id = ?) ORDER BY user_id DESC LIMIT 1');
+
+  const itens = [];
+  const seen = new Set();
+  const push = (ex) => {
+    const est = estimateExercise({ ...ex, prWeight: prStmt.get(uid, ex.name, date).w }, person);
+    itens.push({ name: ex.name, muscle: ex.muscle, tipo: ex.tipo, ...est });
+    seen.add(ex.name);
+  };
+  checked.forEach(c => push({ ...c, sets: setsByEx[c.name] || [], currentWeight: c.current_weight }));
+  Object.keys(setsByEx).forEach(name => {
+    if (seen.has(name)) return;
+    const lib = libStmt.get(name, uid) || {};
+    push({ name, muscle: lib.muscle || '', tipo: lib.tipo || classifyExercise(name, lib.muscle), sets: setsByEx[name] });
+  });
+
+  const kcal = itens.reduce((a, i) => a + i.kcal, 0);
+  const minutes = Math.round(itens.reduce((a, i) => a + i.minutes, 0));
+  const warn = [];
+  if (!person.peso) warn.push('Cadastre seu peso em Medições para uma estimativa mais precisa (usando 70 kg).');
+  else if (!person.idade || !person.altura || !/^[mf]/i.test(person.sexo)) warn.push('Preencha sexo, idade e altura no perfil para refinar a estimativa.');
+  return { date, kcal, minutes, itens, person, warn };
+}
+
+function dateRange(start, end) {
+  const out = [];
+  const d = new Date(start + 'T12:00:00');
+  const e = new Date(end + 'T12:00:00');
+  while (d <= e && out.length < 366) {
+    out.push(d.toLocaleDateString('en-CA'));
+    d.setDate(d.getDate() + 1);
+  }
+  return out;
+}
+
+// Total de um período (só dias com algo registrado)
+function caloriesRange(uid, start, end) {
+  const active = new Set([
+    ...db.prepare('SELECT DISTINCT date FROM workout_log WHERE user_id = ? AND date >= ? AND date <= ?').all(uid, start, end).map(r => r.date),
+    ...db.prepare('SELECT DISTINCT date FROM progressao_carga WHERE user_id = ? AND date >= ? AND date <= ? AND (set_number >= 1 OR reps > 0)').all(uid, start, end).map(r => r.date),
+  ]);
+  const days = dateRange(start, end).map(date => {
+    if (!active.has(date)) return { date, kcal: 0, minutes: 0 };
+    const c = computeCalories(uid, date);
+    return { date, kcal: c.kcal, minutes: c.minutes };
+  });
+  const kcal = days.reduce((a, d) => a + d.kcal, 0);
+  const treinos = days.filter(d => d.kcal > 0).length;
+  return { start, end, days, kcal, treinos, avgPorTreino: treinos ? Math.round(kcal / treinos) : 0 };
+}
+
+app.get('/api/calorias', (req, res) => {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || '')) ? req.query.date : new Date().toLocaleDateString('en-CA');
+  res.json(computeCalories(req.session.userId, date));
+});
+
+app.get('/api/calorias/periodo', (req, res) => {
+  const ok = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+  let { start, end } = req.query;
+  if (!ok(start) || !ok(end)) {
+    const w = weekRange();
+    start = w.start;
+    end = w.end;
+  }
+  if (end < start) return res.status(400).json({ error: 'Período inválido' });
+  res.json(caloriesRange(req.session.userId, start, end));
+});
 
 app.get('/api/gamification', (req, res) => {
   res.json(computeGami(req.session.userId));
@@ -1415,11 +1522,14 @@ app.get('/api/wrapped', (req, res) => {
     if (!favDay || count > favDay.count) favDay = { weekday: +w, count };
   }
 
+  const kcal = caloriesRange(uid, s, e).kcal;
+
   res.json({
     days: DAYS,
     treinos,
     exercicios: logs.length,
     xp,
+    kcal,
     volumeKg: Math.round(volume),
     sets: sr.sets,
     reps: sr.reps,
@@ -1483,6 +1593,7 @@ app.get('/api/wrapped/today', (req, res) => {
   ).get(uid, today).b * wcfg.bottle_size_ml;
 
   const g = computeGami(uid);
+  const kcal = computeCalories(uid, today).kcal;
 
   res.json({
     date: today,
@@ -1492,6 +1603,7 @@ app.get('/api/wrapped/today', (req, res) => {
     planejados,
     complete,
     xp,
+    kcal,
     sets: sr.sets,
     reps: sr.reps,
     volumeKg: Math.round(sr.vol),
@@ -1582,6 +1694,17 @@ function buildAiContext(uid) {
   ).get(uid, daysAgo(30));
   if (t30.n) {
     lines.push(`Últimos 30 dias: ${t30.n} dias de treino (${t30.m} musculação, ${t30.c} corrida), nota média ${fmtNum(t30.r)}/5.`);
+  }
+
+  // Calorias gastas no treino (estimativa por MET)
+  const c7 = caloriesRange(uid, daysAgo(6), today);
+  const c30 = caloriesRange(uid, daysAgo(29), today);
+  if (c30.treinos) {
+    lines.push(`\nCalorias gastas no treino (estimativa): últimos 7 dias ${c7.kcal} kcal em ${c7.treinos} treinos; últimos 30 dias ${c30.kcal} kcal em ${c30.treinos} treinos (média ${c30.avgPorTreino} kcal por treino).`);
+    const hoje = computeCalories(uid, today);
+    if (hoje.itens.length) {
+      lines.push(`Treino de hoje: ~${hoje.kcal} kcal — ${hoje.itens.map(i => `${i.name} ${i.kcal} kcal`).join(', ')}.`);
+    }
   }
 
   // Plano semanal fixo

@@ -1728,15 +1728,22 @@ function weekDates() {
 }
 
 let cicloSummary = {};
+let cicloKcalWeek = { days: [], kcal: 0 }; // /api/calorias/periodo da semana atual
+let cicloKcalCache = {};                   // date -> /api/calorias (detalhe por exercício)
+
+function fmtKcal(n) {
+  return '~' + Math.round(n || 0).toLocaleString('pt-BR');
+}
 
 async function loadCicloData() {
   const dates = weekDates();
-  const [plan, logs, gami, library, summary] = await Promise.all([
+  const [plan, logs, gami, library, summary, kcalWeek] = await Promise.all([
     api('GET', '/api/plan'),
     api('GET', `/api/workout-log?start=${dates[0]}&end=${dates[6]}`),
     api('GET', '/api/gamification'),
     api('GET', '/api/library'),
     api('GET', '/api/progressao/summary'),
+    api('GET', `/api/calorias/periodo?start=${dates[0]}&end=${dates[6]}`),
   ]);
   cicloPlan = plan;
   cicloLogs = logs;
@@ -1744,6 +1751,8 @@ async function loadCicloData() {
   cicloLibrary = library;
   cicloSummary = {};
   summary.forEach(s => { cicloSummary[s.exercise] = s; });
+  cicloKcalWeek = kcalWeek;
+  cicloKcalCache = {};
   renderCiclo();
 }
 
@@ -1790,6 +1799,7 @@ function renderGami() {
   cicloPlan.forEach(p => { if (isDone(p.id, dates[p.weekday])) done++; });
   const weekPct = planned > 0 ? Math.round((done / planned) * 100) : 0;
   countUp(document.getElementById('gami-week-pct'), weekPct, { suffix: '%' });
+  countUp(document.getElementById('gami-kcal-week'), (cicloKcalWeek && cicloKcalWeek.kcal) || 0);
 }
 
 function renderWeekStrip() {
@@ -1862,6 +1872,10 @@ function renderDay() {
           <span>Último treino</span>
           <span class="ex-last-val">${lastTxt}</span>
         </button>
+        <div class="ex-field ex-kcal" title="Estimativa de calorias gastas neste exercício (conta quando concluído ou com séries registradas)">
+          <span>Calorias</span>
+          <span class="ex-kcal-val" data-ex="${esc(p.name)}">${done ? '…' : '—'}</span>
+        </div>
       </div>
       <button class="ex-remove" title="Remover do dia">&#10005;</button>
     `;
@@ -1878,6 +1892,35 @@ function renderDay() {
 
     listEl.appendChild(card);
   });
+
+  fillDayKcal(date);
+}
+
+// Preenche as calorias por exercício e o total do dia (busca uma vez por data e guarda em cache)
+async function fillDayKcal(date) {
+  if (!cicloKcalCache[date]) {
+    try {
+      cicloKcalCache[date] = await api('GET', `/api/calorias?date=${date}`);
+    } catch {
+      return;
+    }
+  }
+  const c = cicloKcalCache[date];
+  const dates = weekDates();
+  if (dates[selectedWeekday] !== date) return; // usuário já trocou de dia
+  const byName = {};
+  c.itens.forEach(i => { byName[i.name] = i; });
+  document.querySelectorAll('#day-exercises .ex-kcal-val').forEach(el => {
+    const it = byName[el.dataset.ex];
+    el.textContent = it ? `${fmtKcal(it.kcal)} kcal` : '—';
+    el.classList.toggle('has', !!it);
+  });
+  const sub = document.getElementById('day-sub');
+  sub.textContent = sub.textContent.replace(/ · ~[\d.]+ kcal.*$/, '');
+  if (c.kcal > 0) sub.textContent += ` · ${fmtKcal(c.kcal)} kcal · ~${c.minutes} min`;
+  const hint = document.getElementById('day-kcal-hint');
+  hint.textContent = c.warn && c.warn.length ? '🔥 ' + c.warn[0] : '';
+  hint.style.display = c.warn && c.warn.length && c.itens.length ? '' : 'none';
 }
 
 async function toggleExercise(item, date) {
@@ -1888,7 +1931,12 @@ async function toggleExercise(item, date) {
   } else {
     cicloLogs = cicloLogs.filter(l => !(l.date === date && l.plan_item_id === item.id));
   }
-  cicloGami = await api('GET', '/api/gamification');
+  delete cicloKcalCache[date];
+  const dates = weekDates();
+  [cicloGami, cicloKcalWeek] = await Promise.all([
+    api('GET', '/api/gamification'),
+    api('GET', `/api/calorias/periodo?start=${dates[0]}&end=${dates[6]}`),
+  ]);
   renderCiclo();
   if (result.done) {
     if (!wasComplete && dayComplete(selectedWeekday, date)) {
@@ -2086,8 +2134,19 @@ document.getElementById('btn-session-save').addEventListener('click', async () =
   updateEvoStats();
   renderSessionRows();
   animateEvoChart();
+  updateEvoKcal();
   loadCicloData();
 });
+
+async function updateEvoKcal() {
+  const el = document.getElementById('evoc-kcal');
+  el.textContent = '—';
+  try {
+    const c = await api('GET', `/api/calorias?date=${todayStr()}`);
+    const it = c.itens.find(i => i.name === evoItem.name);
+    if (it) el.textContent = fmtKcal(it.kcal);
+  } catch { /* estimativa é opcional */ }
+}
 
 async function openEvoModal(p) {
   evoItem = p;
@@ -2103,6 +2162,7 @@ async function openEvoModal(p) {
   renderEvoFilter();
   updateEvoStats();
   renderSessionRows();
+  updateEvoKcal();
 
   modalEvo.classList.remove('hidden');
   animateEvoChart();
@@ -2465,7 +2525,7 @@ let hojeMuscles = '';
 
 async function loadHojeData() {
   const today = todayStr();
-  const [plan, logs, gami, tstats, wcfg, wint, ranking] = await Promise.all([
+  const [plan, logs, gami, tstats, wcfg, wint, ranking, kcal] = await Promise.all([
     api('GET', '/api/plan'),
     api('GET', `/api/workout-log?start=${today}&end=${today}`),
     api('GET', '/api/gamification'),
@@ -2473,11 +2533,12 @@ async function loadHojeData() {
     api('GET', '/api/water-config'),
     api('GET', `/api/water-intake?year=${today.slice(0, 4)}`),
     api('GET', '/api/ranking'),
+    api('GET', `/api/calorias?date=${today}`),
   ]);
-  renderHoje(plan, logs, gami, tstats, wcfg, wint, ranking);
+  renderHoje(plan, logs, gami, tstats, wcfg, wint, ranking, kcal);
 }
 
-function renderHoje(plan, logs, gami, tstats, wcfg, wint, ranking) {
+function renderHoje(plan, logs, gami, tstats, wcfg, wint, ranking, kcal) {
   const now = new Date();
   const today = todayStr();
   const wd = (now.getDay() + 6) % 7;
@@ -2496,8 +2557,9 @@ function renderHoje(plan, logs, gami, tstats, wcfg, wint, ranking) {
   hojeMuscles = [...new Set(items.map(p => p.muscle))].join(' + ');
 
   const doneCount = items.filter(p => doneSet.has(p.id)).length;
+  const kcalTxt = kcal && kcal.kcal > 0 ? ` · ${fmtKcal(kcal.kcal)} kcal` : '';
   document.getElementById('hoje-treino-sub').textContent = items.length
-    ? `${hojeMuscles} · ${doneCount}/${items.length} concluídos`
+    ? `${hojeMuscles} · ${doneCount}/${items.length} concluídos${kcalTxt}`
     : '';
   document.getElementById('btn-hoje-postar').style.display = doneCount > 0 ? '' : 'none';
 
@@ -2548,6 +2610,7 @@ function renderHoje(plan, logs, gami, tstats, wcfg, wint, ranking) {
   countUp(document.getElementById('hoje-streak'), tstats.currentStreak || 0);
   countUp(document.getElementById('hoje-nivel'), gami.level || 1);
   countUp(document.getElementById('hoje-xp'), gami.xp || 0);
+  countUp(document.getElementById('hoje-kcal'), (kcal && kcal.kcal) || 0);
 
   renderRanking(ranking);
 }
@@ -3345,7 +3408,7 @@ function drawWrappedTreino() {
   y += 80;
   y = wrappedStatsGrid(ctx, W, y, [
     [wrappedFmt(data.sets), 'séries feitas'],
-    [wrappedFmt(data.reps), 'reps no total'],
+    [data.kcal > 0 ? '~' + wrappedFmt(data.kcal) + ' kcal' : wrappedFmt(data.reps), data.kcal > 0 ? 'queimadas 🔥' : 'reps no total'],
     [wrappedFmt(data.volumeKg) + ' kg', 'movimentados'],
     [`${data.bestStreak} ${data.bestStreak === 1 ? 'dia' : 'dias'} 🔥`, 'seguidos treinando'],
   ], 138);
@@ -3432,7 +3495,7 @@ function drawWrappedHoje() {
   y += 96;
   y = wrappedStatsGrid(ctx, W, y, [
     [wrappedFmt(d.sets), 'séries'],
-    [wrappedFmt(d.reps), 'reps'],
+    [d.kcal > 0 ? '~' + wrappedFmt(d.kcal) : wrappedFmt(d.reps), d.kcal > 0 ? 'kcal queimadas 🔥' : 'reps'],
     [wrappedFmt(d.volumeKg) + ' kg', 'movimentados'],
     [`+${d.xp} XP`, 'ganhos hoje', '#30d158'],
   ], 138);
@@ -3696,10 +3759,14 @@ async function loadDietReport() {
     ? `start=${dietDateOffsetStr(dietRepOffset)}&days=1`
     : `start=${dietMondayStr(dietRepOffset)}`;
   const rep = await api('GET', `/api/diet-report?${q}`);
-  renderDietReport(rep);
+  let burn = null;
+  try {
+    burn = await api('GET', `/api/calorias/periodo?start=${rep.start}&end=${rep.end}`);
+  } catch { /* estimativa é opcional */ }
+  renderDietReport(rep, burn);
 }
 
-function renderDietReport(rep) {
+function renderDietReport(rep, burn) {
   const fmtBR = n => Number(n).toLocaleString('pt-BR');
   const dm = s => `${s.slice(8, 10)}/${s.slice(5, 7)}`;
 
@@ -3716,6 +3783,13 @@ function renderDietReport(rep) {
   document.getElementById('rep-prot').textContent = fmtBR(Math.round(rep.totals.protein_g)) + ' g';
   document.getElementById('rep-carb').textContent = fmtBR(Math.round(rep.totals.carb_g)) + ' g';
   document.getElementById('rep-fat').textContent = fmtBR(Math.round(rep.totals.fat_g)) + ' g';
+  const burned = burn ? burn.kcal : 0;
+  document.getElementById('rep-burn').textContent = burned > 0 ? fmtKcal(burned) : '0';
+  document.getElementById('rep-burn-lbl').textContent = isDia ? '🔥 gasto no treino' : `🔥 gasto em ${burn ? burn.treinos : 0} treino${burn && burn.treinos === 1 ? '' : 's'}`;
+  const net = Math.round(rep.totals.kcal) - burned;
+  const netEl = document.getElementById('rep-net');
+  netEl.textContent = rep.totals.kcal > 0 ? fmtBR(net) : '0';
+  netEl.classList.toggle('rep-net-neg', rep.totals.kcal > 0 && net < 0);
   document.getElementById('rep-foods-title').textContent = isDia ? 'Alimentos do dia' : 'Alimentos da semana';
 
   // Gráfico: barras empilhadas por refeição, linha tracejada = meta diária.

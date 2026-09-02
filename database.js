@@ -191,9 +191,35 @@ db.exec(`
     name TEXT NOT NULL,
     muscle TEXT NOT NULL DEFAULT '',
     image1 TEXT DEFAULT '',
-    image2 TEXT DEFAULT ''
+    image2 TEXT DEFAULT '',
+    tipo TEXT NOT NULL DEFAULT ''
   )
 `);
+
+// Migração: tipo do exercício (composto / isolado / corporal / cardio) — base do cálculo de calorias
+if (!tableColumns('exercise_library').includes('tipo')) {
+  db.exec("ALTER TABLE exercise_library ADD COLUMN tipo TEXT NOT NULL DEFAULT ''");
+}
+
+// Classifica um exercício pelo nome/músculo. Usado no seed, na migração e ao criar
+// exercícios personalizados sem tipo informado.
+//   composto = multiarticular com carga (supino, agachamento, remada...)
+//   isolado  = monoarticular (rosca, elevação lateral, extensora...)
+//   corporal = peso do corpo (barra fixa, flexão, prancha...)
+//   cardio   = corrida, bike, elíptico...
+const EX_TIPOS = ['composto', 'isolado', 'corporal', 'cardio'];
+function classifyExercise(name, muscle) {
+  const n = String(name || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const m = String(muscle || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  if (m === 'cardio' || /corrida|esteira|bicicleta erg|eliptico|pular corda|remo erg|stairmaster|escada|caminhada|natacao/.test(n)) return 'cardio';
+  if (/barra fixa|flexao de braco|paralela|prancha|abdominal|elevacao de pernas|russian twist|bicicleta|ponte de gluteo|quatro apoios|hiperextensao|passada|step-up|afundo(?! no smith)|bulgaro/.test(n)) return 'corporal';
+  if (/supino|agachamento|leg press|hack|levantamento|stiff|terra|remada|puxada|pulldown|desenvolvimento|bom dia|elevacao pelvica|sumo|goblet|mergulho|afundo/.test(n)) {
+    // "elevação frontal" é isolado de ombro, não composto
+    if (/elevacao frontal/.test(n)) return 'isolado';
+    return 'composto';
+  }
+  return 'isolado';
+}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS plan_items (
@@ -229,13 +255,22 @@ db.exec(`
   const existing = new Set(
     db.prepare('SELECT name FROM exercise_library WHERE user_id IS NULL').all().map((r) => r.name)
   );
-  const insert = db.prepare('INSERT INTO exercise_library (user_id, name, muscle, image1, image2) VALUES (NULL, ?, ?, ?, ?)');
+  const insert = db.prepare('INSERT INTO exercise_library (user_id, name, muscle, image1, image2, tipo) VALUES (NULL, ?, ?, ?, ?, ?)');
   const tx = db.transaction(() => {
     for (const ex of seed) {
       if (existing.has(ex.name)) continue;
-      insert.run(ex.name, ex.muscle, (ex.images && ex.images[0]) || '', (ex.images && ex.images[1]) || '');
+      insert.run(ex.name, ex.muscle, (ex.images && ex.images[0]) || '', (ex.images && ex.images[1]) || '', ex.tipo || classifyExercise(ex.name, ex.muscle));
     }
   });
+  tx();
+})();
+
+// Preenche o tipo dos exercícios que ainda não têm (banco antigo e exercícios do usuário)
+(function backfillExerciseTipo() {
+  const rows = db.prepare("SELECT id, name, muscle FROM exercise_library WHERE tipo IS NULL OR tipo = ''").all();
+  if (!rows.length) return;
+  const upd = db.prepare('UPDATE exercise_library SET tipo = ? WHERE id = ?');
+  const tx = db.transaction(() => rows.forEach(r => upd.run(classifyExercise(r.name, r.muscle), r.id)));
   tx();
 })();
 
@@ -408,4 +443,4 @@ function ensureUserRows(userId) {
   db.prepare('INSERT OR IGNORE INTO diet_config (user_id) VALUES (?)').run(userId);
 }
 
-module.exports = { db, ensureUserRows, normalizeFoodName };
+module.exports = { db, ensureUserRows, normalizeFoodName, classifyExercise, EX_TIPOS };
