@@ -1729,6 +1729,25 @@ function weekDates() {
 
 let cicloSummary = {};
 let cicloKcalWeek = { days: [], kcal: 0 }; // /api/calorias/periodo da semana atual
+
+// Cardio registra tempo + distância em vez de séries
+function isCardio(p) {
+  return !!p && (p.tipo === 'cardio' || p.muscle === 'Cardio');
+}
+function fmtKm(km) {
+  return String(+(+km).toFixed(2)).replace('.', ',');
+}
+function fmtMin(min) {
+  return String(Math.round(+min * 10) / 10).replace('.', ',');
+}
+// Ritmo min/km → "10:34"
+function fmtPace(minutes, km) {
+  if (!(minutes > 0) || !(km > 0)) return '';
+  const p = minutes / km;
+  const m = Math.floor(p);
+  const s = Math.round((p - m) * 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
 let cicloKcalCache = {};                   // date -> /api/calorias (detalhe por exercício)
 
 function fmtKcal(n) {
@@ -1854,9 +1873,16 @@ function renderDay() {
 
     const thumb = animThumb(p.image1, p.image2);
     const sum = cicloSummary[p.name];
-    const lastTxt = sum
-      ? `${String(sum.top).replace('.', ',')} kg${sum.sets ? ' · ' + sum.sets + 's' : ''} <small>${formatShortDate(sum.date)}</small>`
-      : (p.current_weight != null ? String(p.current_weight).replace('.', ',') + ' kg' : '<small>registrar</small>');
+    let lastTxt;
+    if (isCardio(p)) {
+      lastTxt = sum && sum.cardio
+        ? `${fmtMin(sum.minutes)} min${sum.km > 0 ? ' · ' + fmtKm(sum.km) + ' km' : ''} <small>${formatShortDate(sum.date)}</small>`
+        : '<small>registrar tempo</small>';
+    } else {
+      lastTxt = sum && !sum.cardio
+        ? `${String(sum.top).replace('.', ',')} kg${sum.sets ? ' · ' + sum.sets + 's' : ''} <small>${formatShortDate(sum.date)}</small>`
+        : (p.current_weight != null ? String(p.current_weight).replace('.', ',') + ' kg' : '<small>registrar</small>');
+    }
 
     card.innerHTML = `
       <button class="ex-check" title="Concluir em ${formatDate(date)}">
@@ -1988,6 +2014,7 @@ let evoChartRows = [];
 let evoRawRows = [];
 let evoFilter = 'top';
 let evoItem = null;
+let evoCardioAxis = 'km'; // eixo do gráfico de cardio: 'km' | 'min'
 
 // Série do gráfico conforme o filtro: top set (maior carga do dia) ou série específica
 function buildEvoSeries() {
@@ -1995,6 +2022,15 @@ function buildEvoSeries() {
   evoRawRows.forEach(r => { (byDate[r.date] = byDate[r.date] || []).push(r); });
   const dates = Object.keys(byDate).sort();
   const out = [];
+  if (isCardio(evoItem)) {
+    // Um ponto por dia: soma dos blocos. `weight` é o eixo Y (km, ou minutos sem distância)
+    for (const d of dates) {
+      const minutes = byDate[d].reduce((a, r) => a + (+r.minutes || 0), 0);
+      const km = byDate[d].reduce((a, r) => a + (+r.distance_km || 0), 0);
+      out.push({ date: d, weight: evoCardioAxis === 'km' ? +km.toFixed(2) : Math.round(minutes), minutes, km, reps: 0 });
+    }
+    return out;
+  }
   for (const d of dates) {
     const rows = byDate[d];
     if (evoFilter === 'top') {
@@ -2011,6 +2047,26 @@ function buildEvoSeries() {
 function renderEvoFilter() {
   const el = document.getElementById('evoc-filter');
   el.innerHTML = '';
+  if (isCardio(evoItem)) {
+    const hasKm = evoRawRows.some(r => r.distance_km > 0);
+    if (!hasKm) evoCardioAxis = 'min';
+    el.style.display = evoRawRows.length ? '' : 'none';
+    [['Distância', 'km'], ['Tempo', 'min']].forEach(([label, value]) => {
+      if (value === 'km' && !hasKm) return;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'evoc-chip' + (evoCardioAxis === value ? ' active' : '');
+      b.textContent = label;
+      b.addEventListener('click', () => {
+        evoCardioAxis = value;
+        renderEvoFilter();
+        updateEvoStats();
+        animateEvoChart();
+      });
+      el.appendChild(b);
+    });
+    return;
+  }
   const maxSet = Math.max(0, ...evoRawRows.map(r => r.set_number || 0));
   el.style.display = maxSet >= 1 ? '' : 'none';
   const mk = (label, value) => {
@@ -2030,7 +2086,38 @@ function renderEvoFilter() {
   for (let n = 1; n <= maxSet; n++) mk(`Série ${n}`, n);
 }
 
+// Estatísticas do cardio: último tempo, maior distância e ritmo
+function updateEvoStatsCardio() {
+  evoChartRows = buildEvoSeries();
+  const rows = evoChartRows;
+  const last = rows.length ? rows[rows.length - 1] : null;
+  const atualEl = document.getElementById('evoc-atual');
+  const maxEl = document.getElementById('evoc-max');
+  const ganhoEl = document.getElementById('evoc-ganho');
+  ganhoEl.className = 'evoc-stat-value';
+  if (!last) {
+    atualEl.textContent = '—';
+    maxEl.textContent = '—';
+    ganhoEl.textContent = '—';
+    return;
+  }
+  countUp(atualEl, Math.round(last.minutes));
+  const maxKm = Math.max(...rows.map(r => r.km));
+  if (maxKm > 0) countUp(maxEl, maxKm, { decimals: maxKm % 1 ? 1 : 0 });
+  else maxEl.textContent = '—';
+  const pace = fmtPace(last.minutes, last.km);
+  ganhoEl.textContent = pace ? `${pace} /km` : '—';
+  if (pace && rows.length >= 2) {
+    const prev = rows.slice(0, -1).reverse().find(r => r.km > 0);
+    if (prev) {
+      const dp = last.minutes / last.km - prev.minutes / prev.km;
+      if (Math.abs(dp) >= 0.05) ganhoEl.classList.add(dp < 0 ? 'up' : 'down'); // ritmo menor = melhor
+    }
+  }
+}
+
 function updateEvoStats() {
+  if (isCardio(evoItem)) return updateEvoStatsCardio();
   evoChartRows = buildEvoSeries();
   const rows = evoChartRows;
   const atual = rows.length ? rows[rows.length - 1].weight
@@ -2101,24 +2188,89 @@ function addSessionRow(s = { weight: '', reps: '' }) {
 }
 
 function renumberSessionRows() {
+  const cardio = isCardio(evoItem);
   document.querySelectorAll('#evoc-sets .set-num').forEach((el, i) => {
-    el.textContent = `S${i + 1}`;
+    el.textContent = cardio ? `B${i + 1}` : `S${i + 1}`;
   });
+}
+
+// Cardio: cada linha é um bloco (tempo em minutos + distância em km)
+function addCardioRow(b = { minutes: '', distance_km: '' }) {
+  const el = document.getElementById('evoc-sets');
+  const row = document.createElement('div');
+  row.className = 'set-row set-row-cardio';
+  row.innerHTML = `
+    <span class="set-num"></span>
+    <input type="number" class="set-min" step="1" min="0" inputmode="decimal" placeholder="0" value="${b.minutes !== '' && b.minutes != null ? b.minutes : ''}">
+    <span class="set-x">min ·</span>
+    <input type="number" class="set-km" step="0.01" min="0" inputmode="decimal" placeholder="0,0" value="${b.distance_km > 0 ? b.distance_km : ''}">
+    <span class="set-x">km</span>
+    <span class="set-pace"></span>
+    <button type="button" class="set-del" title="Remover bloco">&#10005;</button>
+  `;
+  const upd = () => {
+    const m = parseFloat(row.querySelector('.set-min').value);
+    const k = parseFloat(row.querySelector('.set-km').value);
+    const pace = fmtPace(m, k);
+    row.querySelector('.set-pace').textContent = pace ? `${pace} /km · ${(k / (m / 60)).toFixed(1).replace('.', ',')} km/h` : '';
+  };
+  row.querySelector('.set-min').addEventListener('input', upd);
+  row.querySelector('.set-km').addEventListener('input', upd);
+  upd();
+  row.querySelector('.set-del').addEventListener('click', () => {
+    row.remove();
+    renumberSessionRows();
+  });
+  el.appendChild(row);
+}
+
+function cardioPrefill() {
+  const today = evoRawRows.filter(r => r.date === todayStr());
+  if (today.length) return today.map(r => ({ minutes: r.minutes, distance_km: r.distance_km }));
+  // Sem registro hoje: começa com o último dia como sugestão de tempo, sem distância
+  const dates = [...new Set(evoRawRows.map(r => r.date))].sort();
+  const last = dates.length ? evoRawRows.filter(r => r.date === dates[dates.length - 1]) : [];
+  if (last.length) return last.map(r => ({ minutes: r.minutes, distance_km: '' }));
+  const sch = String(evoItem && evoItem.scheme || '').match(/(\d+)\s*min/i);
+  return [{ minutes: sch ? +sch[1] : '', distance_km: '' }];
 }
 
 function renderSessionRows() {
   const el = document.getElementById('evoc-sets');
   el.innerHTML = '';
-  sessionPrefill().forEach(s => addSessionRow(s));
+  if (isCardio(evoItem)) cardioPrefill().forEach(b => addCardioRow(b));
+  else sessionPrefill().forEach(s => addSessionRow(s));
   renumberSessionRows();
 }
 
 document.getElementById('btn-set-add').addEventListener('click', () => {
-  addSessionRow();
+  if (isCardio(evoItem)) addCardioRow();
+  else addSessionRow();
   renumberSessionRows();
 });
 
+async function saveCardioSession() {
+  const blocks = [...document.querySelectorAll('#evoc-sets .set-row-cardio')].map(r => ({
+    minutes: r.querySelector('.set-min').value,
+    distance_km: r.querySelector('.set-km').value,
+  })).filter(b => b.minutes !== '' && parseFloat(b.minutes) > 0);
+  if (!blocks.length) {
+    toastMsg('Informe o tempo de pelo menos um bloco');
+    return;
+  }
+  await api('POST', '/api/cardio/session', { exercise: evoItem.name, date: todayStr(), blocks });
+  toastMsg('Cardio registrado! 🏃');
+  evoRawRows = await api('GET', `/api/cardio?exercise=${encodeURIComponent(evoItem.name)}`);
+  renderEvoFilter();
+  updateEvoStats();
+  renderSessionRows();
+  animateEvoChart();
+  updateEvoKcal();
+  loadCicloData();
+}
+
 document.getElementById('btn-session-save').addEventListener('click', async () => {
+  if (isCardio(evoItem)) return saveCardioSession();
   const sets = [...document.querySelectorAll('#evoc-sets .set-row')].map(r => ({
     weight: r.querySelector('.set-w').value,
     reps: r.querySelector('.set-r').value,
@@ -2151,7 +2303,20 @@ async function updateEvoKcal() {
 async function openEvoModal(p) {
   evoItem = p;
   evoFilter = 'top';
-  evoRawRows = await api('GET', `/api/progressao?exercise=${encodeURIComponent(p.name)}`);
+  evoCardioAxis = 'km';
+  const cardio = isCardio(p);
+  evoRawRows = await api('GET', cardio
+    ? `/api/cardio?exercise=${encodeURIComponent(p.name)}`
+    : `/api/progressao?exercise=${encodeURIComponent(p.name)}`);
+
+  document.getElementById('evoc-sub').textContent = cardio
+    ? 'Tempo e distância por sessão — o ritmo define as calorias'
+    : 'Evolução da carga máxima ao longo do tempo';
+  document.getElementById('evoc-atual-lbl').textContent = cardio ? 'Último (min)' : 'Atual (kg)';
+  document.getElementById('evoc-max-lbl').textContent = cardio ? 'Maior (km)' : 'Máxima (kg)';
+  document.getElementById('evoc-ganho-lbl').textContent = cardio ? 'Ritmo' : 'Evolução';
+  document.getElementById('btn-set-add-lbl').textContent = cardio ? 'Bloco' : 'Série';
+  document.getElementById('evoc-empty').dataset.cardio = cardio ? '1' : '';
 
   document.getElementById('evoc-title').textContent = p.name;
   document.getElementById('evoc-thumb').innerHTML = animThumb(p.image1, p.image2);
@@ -2204,7 +2369,9 @@ function drawEvoChart(hoverIdx = -1, progress = 1) {
   emptyEl.style.display = hasData ? 'none' : '';
   emptyEl.textContent = rows.length === 1
     ? 'Primeiro registro feito! O gráfico aparece a partir do segundo treino. 💪'
-    : 'Sem histórico ainda. Registre o treino de hoje abaixo para começar o gráfico.';
+    : (emptyEl.dataset.cardio
+      ? 'Sem histórico ainda. Registre o tempo e a distância de hoje abaixo para começar o gráfico.'
+      : 'Sem histórico ainda. Registre o treino de hoje abaixo para começar o gráfico.');
   evoPoints = [];
   if (!hasData) return;
 
@@ -2355,7 +2522,15 @@ evocCanvas.addEventListener('pointermove', e => {
     }
     const record = p.weight === Math.max(...evoPoints.map(q => q.weight)) ? ' 🏆' : '';
     const repsTxt = p.reps ? ` × ${p.reps}` : '';
-    evocTooltip.innerHTML = `<strong>${fmtW(p.weight)} kg${repsTxt}</strong>${deltaHtml}${record}<span class="tt-date">${formatShortDate(p.date)}</span>`;
+    let unit = 'kg';
+    let extra = repsTxt;
+    if (isCardio(evoItem)) {
+      unit = evoCardioAxis === 'km' ? 'km' : 'min';
+      const pace = fmtPace(p.minutes, p.km);
+      extra = evoCardioAxis === 'km' ? ` · ${Math.round(p.minutes)} min` : (p.km > 0 ? ` · ${fmtKm(p.km)} km` : '');
+      if (pace) extra += ` · ${pace} /km`;
+    }
+    evocTooltip.innerHTML = `<strong>${fmtW(p.weight)} ${unit}${extra}</strong>${deltaHtml}${record}<span class="tt-date">${formatShortDate(p.date)}</span>`;
     evocTooltip.style.display = 'block';
     const ttw = evocTooltip.offsetWidth;
     evocTooltip.style.left = Math.min(e.clientX + 14, window.innerWidth - ttw - 10) + 'px';
@@ -3766,6 +3941,71 @@ async function loadDietReport() {
   renderDietReport(rep, burn);
 }
 
+// Balanço energético: ingestão − (gasto em repouso × rotina + treino).
+// Só conta dias com refeição registrada; sem registro o "déficit" seria falso.
+const DAILY_ACTIVITY_FACTOR = 1.2; // rotina leve fora do treino (sentado, deslocamentos)
+
+function renderEnergyBalance(rep, burn, isDia) {
+  const fmtBR = n => Number(n).toLocaleString('pt-BR');
+  const fmtSigned = n => (n > 0 ? '+' : n < 0 ? '−' : '') + fmtBR(Math.abs(Math.round(n)));
+  const basal = burn && burn.basal > 0 ? burn.basal : 0;
+  const burnByDate = {};
+  ((burn && burn.days) || []).forEach(d => { burnByDate[d.date] = d.kcal; });
+
+  const days = rep.days.map(d => {
+    const treino = burnByDate[d.date] || 0;
+    const gasto = basal > 0 ? Math.round(basal * DAILY_ACTIVITY_FACTOR) + treino : 0;
+    return { date: d.date, kcal: d.kcal, treino, gasto, saldo: d.kcal > 0 && gasto > 0 ? Math.round(d.kcal) - gasto : null };
+  });
+  const logged = days.filter(d => d.saldo != null);
+  const totalGasto = logged.reduce((a, d) => a + d.gasto, 0);
+  const totalSaldo = logged.reduce((a, d) => a + d.saldo, 0);
+
+  const tdeeEl = document.getElementById('rep-tdee');
+  const netEl = document.getElementById('rep-net');
+  const netLbl = document.getElementById('rep-net-lbl');
+  const note = document.getElementById('diet-balance-note');
+  tdeeEl.textContent = logged.length ? fmtKcal(totalGasto) : '—';
+  document.getElementById('rep-tdee-lbl').textContent = isDia ? 'gasto total' : `gasto em ${logged.length} dia${logged.length === 1 ? '' : 's'}`;
+  netEl.classList.remove('rep-net-neg', 'rep-net-pos');
+  if (!logged.length) {
+    netEl.textContent = '—';
+    netLbl.textContent = 'déficit';
+    note.style.display = 'none';
+  } else {
+    netEl.textContent = fmtSigned(totalSaldo);
+    netEl.classList.add(totalSaldo < 0 ? 'rep-net-neg' : 'rep-net-pos');
+    netLbl.textContent = totalSaldo <= 0 ? (isDia ? 'déficit do dia' : 'déficit da semana') : (isDia ? 'superávit do dia' : 'superávit da semana');
+    const avg = Math.round(totalSaldo / logged.length);
+    note.style.display = '';
+    const fatKg = `${totalSaldo <= 0 ? '−' : '+'}${(Math.abs(totalSaldo) / 7700).toFixed(2).replace('.', ',')} kg`;
+    note.textContent = isDia
+      ? `Gasto do dia: ${fmtBR(basal)} em repouso × ${String(DAILY_ACTIVITY_FACTOR).replace('.', ',')} de rotina + ${fmtBR(logged[0].treino)} no treino. Estimativa (±25%).`
+      : `Média de ${fmtSigned(avg)} kcal/dia nos ${logged.length} dias com refeição registrada · equivale a ${fatKg} de gordura.`;
+  }
+  if (basal === 0 && logged.length === 0) {
+    note.style.display = '';
+    note.textContent = 'Cadastre peso, sexo, idade e altura no perfil para ver o déficit.';
+  }
+
+  // Faixa por dia (só na semana)
+  const strip = document.getElementById('diet-balance');
+  strip.innerHTML = '';
+  strip.style.display = isDia || !logged.length ? 'none' : '';
+  if (isDia) return;
+  const WD = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+  days.forEach(d => {
+    const wd = (new Date(d.date + 'T12:00:00').getDay() + 6) % 7;
+    const chip = document.createElement('div');
+    chip.className = 'db-chip' + (d.saldo == null ? ' empty' : d.saldo < 0 ? ' neg' : ' pos');
+    chip.innerHTML = `<span class="db-day">${WD[wd]}</span><b>${d.saldo == null ? '·' : fmtSigned(d.saldo)}</b>`;
+    chip.title = d.saldo == null
+      ? 'Sem refeição registrada'
+      : `${fmtBR(Math.round(d.kcal))} consumidas − ${fmtBR(d.gasto)} gastas (${fmtBR(d.treino)} no treino)`;
+    strip.appendChild(chip);
+  });
+}
+
 function renderDietReport(rep, burn) {
   const fmtBR = n => Number(n).toLocaleString('pt-BR');
   const dm = s => `${s.slice(8, 10)}/${s.slice(5, 7)}`;
@@ -3786,10 +4026,7 @@ function renderDietReport(rep, burn) {
   const burned = burn ? burn.kcal : 0;
   document.getElementById('rep-burn').textContent = burned > 0 ? fmtKcal(burned) : '0';
   document.getElementById('rep-burn-lbl').textContent = isDia ? '🔥 gasto no treino' : `🔥 gasto em ${burn ? burn.treinos : 0} treino${burn && burn.treinos === 1 ? '' : 's'}`;
-  const net = Math.round(rep.totals.kcal) - burned;
-  const netEl = document.getElementById('rep-net');
-  netEl.textContent = rep.totals.kcal > 0 ? fmtBR(net) : '0';
-  netEl.classList.toggle('rep-net-neg', rep.totals.kcal > 0 && net < 0);
+  renderEnergyBalance(rep, burn, isDia);
   document.getElementById('rep-foods-title').textContent = isDia ? 'Alimentos do dia' : 'Alimentos da semana';
 
   // Gráfico: barras empilhadas por refeição, linha tracejada = meta diária.

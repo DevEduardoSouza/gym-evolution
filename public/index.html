@@ -322,12 +322,15 @@
           <div class="report-stat"><b id="rep-carb">0 g</b><span>carboidrato</span></div>
           <div class="report-stat"><b id="rep-fat">0 g</b><span>gordura</span></div>
           <div class="report-stat"><b id="rep-burn" class="rep-burn">0</b><span id="rep-burn-lbl">🔥 gasto no treino</span></div>
-          <div class="report-stat"><b id="rep-net">0</b><span title="Consumido menos o gasto estimado no treino">saldo líquido</span></div>
+          <div class="report-stat"><b id="rep-tdee">0</b><span id="rep-tdee-lbl" title="Gasto em repouso × 1,2 (rotina do dia a dia) + treino estimado">gasto total</span></div>
+          <div class="report-stat"><b id="rep-net">0</b><span id="rep-net-lbl" title="Consumido menos o gasto total estimado. Negativo = déficit.">déficit</span></div>
         </div>
+        <p class="diet-balance-note" id="diet-balance-note" style="display:none"></p>
         <div class="diet-chart-wrap">
           <div class="diet-chart" id="diet-chart"></div>
         </div>
         <p class="diet-chart-caption" id="diet-chart-caption"></p>
+        <div class="diet-balance" id="diet-balance"></div>
         <div class="diet-legend" id="diet-legend"></div>
         <div class="report-macros" id="rep-macros"></div>
         <h4 class="report-sub" id="rep-foods-title">Alimentos da semana</h4>
@@ -788,15 +791,15 @@
       <div class="evoc-stats">
         <div class="evoc-stat">
           <span class="evoc-stat-value" id="evoc-atual">—</span>
-          <span class="evoc-stat-label">Atual (kg)</span>
+          <span class="evoc-stat-label" id="evoc-atual-lbl">Atual (kg)</span>
         </div>
         <div class="evoc-stat">
           <span class="evoc-stat-value" id="evoc-max">—</span>
-          <span class="evoc-stat-label">Máxima (kg)</span>
+          <span class="evoc-stat-label" id="evoc-max-lbl">Máxima (kg)</span>
         </div>
         <div class="evoc-stat">
           <span class="evoc-stat-value" id="evoc-ganho">—</span>
-          <span class="evoc-stat-label">Evolução</span>
+          <span class="evoc-stat-label" id="evoc-ganho-lbl">Evolução</span>
         </div>
         <div class="evoc-stat">
           <span class="evoc-stat-value evoc-kcal" id="evoc-kcal">—</span>
@@ -815,7 +818,7 @@
         </div>
         <div id="evoc-sets"></div>
         <div class="evoc-session-actions">
-          <button type="button" id="btn-set-add" class="btn-secondary btn-sm"><span data-icon="plus"></span> Série</button>
+          <button type="button" id="btn-set-add" class="btn-secondary btn-sm"><span data-icon="plus"></span> <span id="btn-set-add-lbl">Série</span></button>
           <button type="button" id="btn-session-save" class="btn-primary btn-sm">Salvar treino</button>
         </div>
       </div>

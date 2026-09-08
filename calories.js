@@ -11,6 +11,9 @@
 // - Minutos: estimados a partir das séries (tempo de execução + descanso). Não há
 //   cronômetro no app; é a maior fonte de erro e o primeiro lugar a melhorar.
 // - EPOC: +7% pra musculação (queima pós-treino), 0 pra cardio.
+// - Cardio: com tempo + distância registrados, caminhada/corrida usa o MET pela
+//   velocidade (tabela do Compendium, interpolada). Sem distância, MET fixo por
+//   modalidade (bike, elíptico, corda...). Sem nada, 20 min no MET da modalidade.
 //
 // É uma ESTIMATIVA (margem de ±25%). Serve pra comparar dias e cruzar com a dieta,
 // não pra contabilidade exata.
@@ -27,6 +30,56 @@ const SETUP_MIN = 1.5;  // troca de aparelho / ajuste de carga por exercício
 const SETUP_MET = 2.5;
 const DEFAULT_PESO = 70;
 const DEFAULT_CARDIO_MIN = 20;
+
+// MET por velocidade (km/h) para caminhada/corrida em piso plano — Compendium 2011
+// (caminhada 3,2→2,8 · 4,8→3,5 · 5,6→4,3 · 6,4→5,0 · 7,2→7,0; corrida 8→8,3 · 9,7→9,8
+//  · 11,3→11,0 · 12,9→11,8 · 14,5→12,8 · 16→14,5). Entre pontos, interpola.
+const SPEED_MET = [
+  [2.0, 2.0], [3.2, 2.8], [4.0, 3.0], [4.8, 3.5], [5.6, 4.3], [6.4, 5.0], [7.2, 7.0],
+  [8.0, 8.3], [9.7, 9.8], [11.3, 11.0], [12.9, 11.8], [14.5, 12.8], [16.1, 14.5], [19.3, 19.0],
+];
+
+// MET fixo por modalidade quando não dá pra usar velocidade
+const CARDIO_MODALITY = [
+  [/bicicleta|bike|spinning|ciclismo/, 6.8],
+  [/eliptico|transport/, 5.0],
+  [/pular corda|corda/, 11.0],
+  [/remo/, 7.0],
+  [/escada|stairmaster|stair/, 9.0],
+  [/natacao|nado/, 6.0],
+  [/caminhada/, 4.3],
+  [/corrida|esteira/, 7.0],
+];
+
+function isFootCardio(name) {
+  const n = String(name || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  return /corrida|esteira|caminhada|trote|cooper/.test(n) && !/bicicleta|bike/.test(n);
+}
+
+function modalityMet(name) {
+  const n = String(name || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const hit = CARDIO_MODALITY.find(([re]) => re.test(n));
+  return hit ? hit[1] : TIPO_PARAMS.cardio.met;
+}
+
+function metForSpeed(kmh) {
+  if (!(kmh > 0)) return null;
+  if (kmh <= SPEED_MET[0][0]) return SPEED_MET[0][1];
+  for (let i = 1; i < SPEED_MET.length; i++) {
+    const [s0, m0] = SPEED_MET[i - 1];
+    const [s1, m1] = SPEED_MET[i];
+    if (kmh <= s1) return m0 + ((kmh - s0) / (s1 - s0)) * (m1 - m0);
+  }
+  return SPEED_MET[SPEED_MET.length - 1][1];
+}
+
+// MET de um bloco de cardio: velocidade quando é a pé e tem distância, senão modalidade
+function cardioMet(name, minutes, distanceKm) {
+  if (isFootCardio(name) && minutes > 0 && distanceKm > 0) {
+    return metForSpeed(distanceKm / (minutes / 60));
+  }
+  return modalityMet(name);
+}
 
 function paramsFor(tipo) {
   return TIPO_PARAMS[tipo] || TIPO_PARAMS.isolado;
@@ -83,10 +136,32 @@ function estimateExercise(ex, person) {
   const peso = person.peso > 0 ? person.peso : DEFAULT_PESO;
 
   if (tipo === 'cardio') {
-    const sch = parseScheme(ex.scheme);
-    const minutes = ex.minutes > 0 ? ex.minutes : (sch.minutes || DEFAULT_CARDIO_MIN);
-    const met = P.met;
-    return { kcal: Math.round(met * restKcal * minutes), minutes, met, sets: 0, reps: 0, topWeight: 0, source: ex.minutes > 0 ? 'series' : 'plano' };
+    // Blocos registrados (tempo + distância) > minutos avulsos > esquema do plano ("30 min")
+    let blocks = Array.isArray(ex.cardio) ? ex.cardio.filter(b => b && b.minutes > 0) : [];
+    let source = 'series';
+    if (!blocks.length && ex.minutes > 0) blocks = [{ minutes: ex.minutes, distance_km: ex.distance_km || 0 }];
+    if (!blocks.length) {
+      const sch = parseScheme(ex.scheme);
+      blocks = [{ minutes: sch.minutes || DEFAULT_CARDIO_MIN, distance_km: 0 }];
+      source = 'plano';
+    }
+    let kcal = 0, minutes = 0, distance = 0;
+    blocks.forEach(b => {
+      const met = cardioMet(ex.name, b.minutes, b.distance_km);
+      kcal += met * restKcal * b.minutes;
+      minutes += b.minutes;
+      distance += b.distance_km > 0 ? b.distance_km : 0;
+    });
+    const met = minutes > 0 ? kcal / (restKcal * minutes) : P.met;
+    return {
+      kcal: Math.round(kcal),
+      minutes: Math.round(minutes),
+      met: Math.round(met * 10) / 10,
+      sets: 0, reps: 0, topWeight: 0,
+      distance: Math.round(distance * 100) / 100,
+      blocks: blocks.length,
+      source,
+    };
   }
 
   // Séries reais registradas > esquema do plano
@@ -125,4 +200,4 @@ function estimateExercise(ex, person) {
   };
 }
 
-module.exports = { estimateExercise, restingKcalPerMin, parseScheme, TIPO_PARAMS, DEFAULT_PESO };
+module.exports = { estimateExercise, restingKcalPerMin, parseScheme, cardioMet, metForSpeed, TIPO_PARAMS, DEFAULT_PESO };

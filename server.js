@@ -2,7 +2,7 @@ const express = require('express');
 const session = require('express-session');
 const path = require('path');
 const { db, ensureUserRows, normalizeFoodName, classifyExercise, EX_TIPOS } = require('./database');
-const { estimateExercise } = require('./calories');
+const { estimateExercise, restingKcalPerMin } = require('./calories');
 const { hashPassword, verifyPassword } = require('./auth');
 
 // Carrega o .env sem depender de pacote externo (variáveis já definidas têm prioridade)
@@ -458,7 +458,7 @@ app.get('/api/progressao/exercises', (req, res) => {
 // Resumo da última sessão de cada exercício (para os cards do plano)
 app.get('/api/progressao/summary', (req, res) => {
   const uid = req.session.userId;
-  const rows = db.prepare(`
+  let rows = db.prepare(`
     SELECT pc.exercise, pc.date, MAX(pc.weight) AS top,
            SUM(CASE WHEN pc.set_number >= 1 THEN 1 ELSE 0 END) AS sets
     FROM progressao_carga pc
@@ -468,6 +468,18 @@ app.get('/api/progressao/summary', (req, res) => {
     WHERE pc.user_id = ?
     GROUP BY pc.exercise
   `).all(uid, uid);
+  // Cardio: última sessão com tempo e distância somados
+  const cardio = db.prepare(`
+    SELECT cl.exercise, cl.date, SUM(cl.minutes) AS minutes, SUM(cl.distance_km) AS km, COUNT(*) AS blocks
+    FROM cardio_log cl
+    JOIN (SELECT exercise, MAX(date) AS md FROM cardio_log WHERE user_id = ? GROUP BY exercise) last
+      ON last.exercise = cl.exercise AND last.md = cl.date
+    WHERE cl.user_id = ?
+    GROUP BY cl.exercise
+  `).all(uid, uid).map(r => ({ ...r, cardio: true }));
+  const names = new Set(cardio.map(c => c.exercise));
+  rows.forEach(r => { if (!names.has(r.exercise)) cardio.push(r); });
+  rows = cardio;
   res.json(rows);
 });
 
@@ -542,6 +554,48 @@ app.delete('/api/progressao/:id', (req, res) => {
   res.json({ success: true });
 });
 
+// ======== CARDIO (tempo + distância) ========
+
+// Histórico de um exercício de cardio (uma linha por bloco)
+app.get('/api/cardio', (req, res) => {
+  const { exercise } = req.query;
+  let sql = 'SELECT * FROM cardio_log WHERE user_id = ?';
+  const params = [req.session.userId];
+  if (exercise) { sql += ' AND exercise = ?'; params.push(exercise); }
+  sql += ' ORDER BY date ASC, block ASC, id ASC';
+  res.json(db.prepare(sql).all(...params));
+});
+
+// Salva a sessão do dia de um cardio (substitui os blocos daquele exercício/dia)
+app.post('/api/cardio/session', (req, res) => {
+  const exercise = String(req.body.exercise || '').trim();
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body.date || '')) ? req.body.date : new Date().toLocaleDateString('en-CA');
+  const blocks = Array.isArray(req.body.blocks) ? req.body.blocks : [];
+  if (!exercise) return res.status(400).json({ error: 'Exercício é obrigatório' });
+
+  const clean = blocks
+    .map(b => ({ minutes: parseFloat(b.minutes), distance_km: parseFloat(b.distance_km) || 0 }))
+    .filter(b => b.minutes > 0 && b.minutes <= 600 && b.distance_km >= 0 && b.distance_km <= 200);
+  if (!clean.length) return res.status(400).json({ error: 'Informe o tempo de pelo menos um bloco' });
+
+  const uid = req.session.userId;
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM cardio_log WHERE user_id = ? AND exercise = ? AND date = ?').run(uid, exercise, date);
+    const ins = db.prepare('INSERT INTO cardio_log (user_id, date, exercise, minutes, distance_km, block) VALUES (?, ?, ?, ?, ?, ?)');
+    clean.forEach((b, i) => ins.run(uid, date, exercise, b.minutes, b.distance_km, i + 1));
+  });
+  tx();
+  const minutes = clean.reduce((a, b) => a + b.minutes, 0);
+  const km = clean.reduce((a, b) => a + b.distance_km, 0);
+  res.status(201).json({ saved: clean.length, date, minutes, km });
+});
+
+app.delete('/api/cardio/:id', (req, res) => {
+  const result = db.prepare('DELETE FROM cardio_log WHERE id = ? AND user_id = ?').run(req.params.id, req.session.userId);
+  if (result.changes === 0) return res.status(404).json({ error: 'Registro não encontrado' });
+  res.json({ success: true });
+});
+
 // ======== CICLO DE TREINO SEMANAL ========
 
 // Biblioteca de exercícios (globais + do usuário)
@@ -574,7 +628,7 @@ app.delete('/api/library/:id', (req, res) => {
 // Plano semanal
 app.get('/api/plan', (req, res) => {
   const rows = db.prepare(`
-    SELECT p.*, e.name, e.muscle, e.image1, e.image2
+    SELECT p.*, e.name, e.muscle, e.image1, e.image2, e.tipo
     FROM plan_items p
     JOIN exercise_library e ON e.id = p.exercise_id
     WHERE p.user_id = ?
@@ -595,7 +649,7 @@ app.post('/api/plan', (req, res) => {
   const result = db.prepare('INSERT INTO plan_items (user_id, weekday, exercise_id, scheme, position) VALUES (?, ?, ?, ?, ?)')
     .run(req.session.userId, wd, exercise_id, String(scheme || '3 × 10-12'), maxPos + 1);
   const row = db.prepare(`
-    SELECT p.*, e.name, e.muscle, e.image1, e.image2 FROM plan_items p
+    SELECT p.*, e.name, e.muscle, e.image1, e.image2, e.tipo FROM plan_items p
     JOIN exercise_library e ON e.id = p.exercise_id WHERE p.id = ?
   `).get(result.lastInsertRowid);
   res.status(201).json(row);
@@ -620,7 +674,7 @@ app.put('/api/plan/:id', (req, res) => {
   }
 
   const row = db.prepare(`
-    SELECT p.*, e.name, e.muscle, e.image1, e.image2 FROM plan_items p
+    SELECT p.*, e.name, e.muscle, e.image1, e.image2, e.tipo FROM plan_items p
     JOIN exercise_library e ON e.id = p.exercise_id WHERE p.id = ?
   `).get(req.params.id);
   res.json(row);
@@ -845,21 +899,36 @@ function computeCalories(uid, date) {
   const setsByEx = {};
   setRows.forEach(r => { (setsByEx[r.exercise] = setsByEx[r.exercise] || []).push({ weight: r.weight, reps: r.reps }); });
 
+  const cardioRows = db.prepare(`
+    SELECT exercise, minutes, distance_km FROM cardio_log
+    WHERE user_id = ? AND date = ? AND minutes > 0
+    ORDER BY exercise, block, id
+  `).all(uid, date);
+  const cardioByEx = {};
+  cardioRows.forEach(r => { (cardioByEx[r.exercise] = cardioByEx[r.exercise] || []).push({ minutes: r.minutes, distance_km: r.distance_km }); });
+
   const prStmt = db.prepare('SELECT COALESCE(MAX(weight), 0) w FROM progressao_carga WHERE user_id = ? AND exercise = ? AND date <= ?');
   const libStmt = db.prepare('SELECT muscle, tipo FROM exercise_library WHERE name = ? AND (user_id IS NULL OR user_id = ?) ORDER BY user_id DESC LIMIT 1');
 
   const itens = [];
   const seen = new Set();
   const push = (ex) => {
+    if (!ex.tipo) ex.tipo = classifyExercise(ex.name, ex.muscle);
     const est = estimateExercise({ ...ex, prWeight: prStmt.get(uid, ex.name, date).w }, person);
     itens.push({ name: ex.name, muscle: ex.muscle, tipo: ex.tipo, ...est });
     seen.add(ex.name);
   };
-  checked.forEach(c => push({ ...c, sets: setsByEx[c.name] || [], currentWeight: c.current_weight }));
+  checked.forEach(c => push({ ...c, sets: setsByEx[c.name] || [], cardio: cardioByEx[c.name] || [], currentWeight: c.current_weight }));
   Object.keys(setsByEx).forEach(name => {
     if (seen.has(name)) return;
     const lib = libStmt.get(name, uid) || {};
     push({ name, muscle: lib.muscle || '', tipo: lib.tipo || classifyExercise(name, lib.muscle), sets: setsByEx[name] });
+  });
+  // Cardio registrado num dia em que o exercício não foi marcado no plano
+  Object.keys(cardioByEx).forEach(name => {
+    if (seen.has(name)) return;
+    const lib = libStmt.get(name, uid) || {};
+    push({ name, muscle: lib.muscle || 'Cardio', tipo: 'cardio', cardio: cardioByEx[name] });
   });
 
   const kcal = itens.reduce((a, i) => a + i.kcal, 0);
@@ -867,7 +936,8 @@ function computeCalories(uid, date) {
   const warn = [];
   if (!person.peso) warn.push('Cadastre seu peso em Medições para uma estimativa mais precisa (usando 70 kg).');
   else if (!person.idade || !person.altura || !/^[mf]/i.test(person.sexo)) warn.push('Preencha sexo, idade e altura no perfil para refinar a estimativa.');
-  return { date, kcal, minutes, itens, person, warn };
+  const basal = Math.round(restingKcalPerMin(person) * 1440);
+  return { date, kcal, minutes, itens, person, basal, warn };
 }
 
 function dateRange(start, end) {
@@ -886,6 +956,7 @@ function caloriesRange(uid, start, end) {
   const active = new Set([
     ...db.prepare('SELECT DISTINCT date FROM workout_log WHERE user_id = ? AND date >= ? AND date <= ?').all(uid, start, end).map(r => r.date),
     ...db.prepare('SELECT DISTINCT date FROM progressao_carga WHERE user_id = ? AND date >= ? AND date <= ? AND (set_number >= 1 OR reps > 0)').all(uid, start, end).map(r => r.date),
+    ...db.prepare('SELECT DISTINCT date FROM cardio_log WHERE user_id = ? AND date >= ? AND date <= ? AND minutes > 0').all(uid, start, end).map(r => r.date),
   ]);
   const days = dateRange(start, end).map(date => {
     if (!active.has(date)) return { date, kcal: 0, minutes: 0 };
@@ -894,7 +965,9 @@ function caloriesRange(uid, start, end) {
   });
   const kcal = days.reduce((a, d) => a + d.kcal, 0);
   const treinos = days.filter(d => d.kcal > 0).length;
-  return { start, end, days, kcal, treinos, avgPorTreino: treinos ? Math.round(kcal / treinos) : 0 };
+  // Gasto em repouso (kcal/dia) da pessoa — base do balanço energético na aba Dieta
+  const basal = Math.round(restingKcalPerMin(personFor(uid)) * 1440);
+  return { start, end, days, kcal, treinos, avgPorTreino: treinos ? Math.round(kcal / treinos) : 0, basal };
 }
 
 app.get('/api/calorias', (req, res) => {

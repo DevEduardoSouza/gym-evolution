@@ -4900,3 +4900,42 @@ button, a, input, select, textarea, label, canvas,
 .evoc-stat-value.evoc-kcal { color: #ff9f0a; }
 .report-stat b.rep-burn { color: #ff9f0a; }
 .report-stat b.rep-net-neg { color: #30d158; }
+.report-stat b.rep-net-pos { color: #ff453a; }
+.diet-balance-note {
+  margin: -8px 0 16px;
+  color: #8e8e93;
+  font-size: 0.76rem;
+  text-align: center;
+}
+/* Déficit por dia da semana */
+.diet-balance {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  margin-top: 10px;
+}
+.db-chip {
+  text-align: center;
+  padding: 7px 2px;
+  border-radius: 10px;
+  background: var(--card-2);
+  border: 1px solid var(--border-soft);
+  font-variant-numeric: tabular-nums;
+}
+.db-chip .db-day { display: block; font-size: 0.66rem; color: #8e8e93; margin-bottom: 2px; }
+.db-chip b { font-size: 0.8rem; color: #fff; }
+.db-chip.neg b { color: #30d158; }
+.db-chip.pos b { color: #ff453a; }
+.db-chip.empty b { color: #48484c; }
+/* Blocos de cardio no modal de evolução */
+.set-row-cardio .set-pace {
+  font-size: 0.68rem;
+  color: var(--faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 480px) {
+  .set-row-cardio .set-pace { display: none; }
+  .db-chip b { font-size: 0.72rem; }
+}
