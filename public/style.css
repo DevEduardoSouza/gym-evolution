@@ -3785,6 +3785,73 @@ body.anim-flip .ex-anim2 .f2 { opacity: 1; }
 
 /* Mini stats */
 .hoje-mini-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+
+/* Balanço energético (Hoje) */
+.hoje-balance-card { margin-bottom: 14px; }
+.hb-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 22px;
+  align-items: stretch;
+}
+.hb-today { display: flex; flex-direction: column; gap: 6px; }
+.hb-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.hb-big {
+  font-size: 2.2rem;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.hb-big.neg, .hb-week-total.neg, .hb-day.neg .hb-day-val { color: #30d158; }
+.hb-big.pos, .hb-week-total.pos, .hb-day.pos .hb-day-val { color: #ff453a; }
+.hb-sub { color: #8e8e93; font-size: 0.85rem; }
+.hb-note { color: var(--faint); font-size: 0.72rem; margin-top: 4px; }
+.hb-bars { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.hb-bar-row {
+  display: grid;
+  grid-template-columns: 74px 1fr 58px;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.76rem;
+  color: #8e8e93;
+}
+.hb-bar-row b { color: #fff; text-align: right; font-variant-numeric: tabular-nums; }
+.hb-bar { height: 8px; border-radius: 4px; background: var(--card-2); overflow: hidden; }
+.hb-bar-fill { height: 100%; border-radius: 4px; transition: width 0.6s ease; }
+.hb-bar-fill.in { background: #0a84ff; }
+.hb-bar-fill.out { background: #ff9f0a; }
+.hb-week { display: flex; flex-direction: column; gap: 8px; border-left: 1px solid var(--border-soft); padding-left: 22px; }
+.hb-week-head { display: flex; justify-content: space-between; align-items: baseline; }
+.hb-week-total { font-size: 1.25rem; font-weight: 800; color: #fff; font-variant-numeric: tabular-nums; }
+.hb-week-days {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  align-items: end;
+}
+.hb-day { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.hb-day-val { font-size: 0.64rem; font-weight: 700; min-height: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hb-day-track { height: 36px; width: 100%; display: flex; align-items: flex-end; justify-content: center; }
+.hb-day-bar { width: 60%; max-width: 22px; border-radius: 4px 4px 2px 2px; background: #48484c; }
+.hb-day.neg .hb-day-bar { background: #30d158; }
+.hb-day.pos .hb-day-bar { background: #ff453a; }
+.hb-day.empty .hb-day-bar, .hb-day.future .hb-day-bar { height: 3px !important; width: 60%; background: var(--card-3); }
+.hb-day-lbl { font-size: 0.68rem; color: var(--faint); font-weight: 600; }
+.hb-day.today .hb-day-lbl { color: #fff; }
+@media (max-width: 720px) {
+  .hb-grid { grid-template-columns: 1fr; gap: 16px; }
+  .hb-week { border-left: none; padding-left: 0; border-top: 1px solid var(--border-soft); padding-top: 14px; }
+  .hb-big { font-size: 1.9rem; }
+  .hb-day-val { font-size: 0.58rem; }
+}
 .hoje-mini-value.hoje-kcal { color: #ff9f0a; }
 .hoje-mini { display: flex; flex-direction: column; align-items: center; gap: 3px; }
 .hoje-mini-value { font-size: 1.4rem; font-weight: 800; color: #fff; letter-spacing: -0.02em; }

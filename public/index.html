@@ -137,6 +137,32 @@
           </div>
         </div>
       </div>
+      <div class="hoje-card hoje-balance-card" id="hoje-balance">
+        <div class="hoje-card-head">
+          <h3>⚖️ Balanço energético</h3>
+          <button id="btn-hoje-dieta" class="btn-secondary btn-sm">Registrar refeições</button>
+        </div>
+        <div class="hb-grid">
+          <div class="hb-today">
+            <span class="hb-label" id="hb-today-label">Hoje</span>
+            <span class="hb-big" id="hb-today-val">—</span>
+            <span class="hb-sub" id="hb-today-sub">Registre as refeições de hoje na aba Dieta para ver o déficit.</span>
+            <div class="hb-bars" id="hb-today-bars" style="display:none">
+              <div class="hb-bar-row"><span>Consumido</span><div class="hb-bar"><div class="hb-bar-fill in" id="hb-bar-in"></div></div><b id="hb-bar-in-val">0</b></div>
+              <div class="hb-bar-row"><span>Gasto</span><div class="hb-bar"><div class="hb-bar-fill out" id="hb-bar-out"></div></div><b id="hb-bar-out-val">0</b></div>
+            </div>
+            <span class="hb-note" id="hb-today-note"></span>
+          </div>
+          <div class="hb-week">
+            <div class="hb-week-head">
+              <span class="hb-label">Semana</span>
+              <span class="hb-week-total" id="hb-week-val">—</span>
+            </div>
+            <div class="hb-week-days" id="hb-week-days"></div>
+            <span class="hb-note" id="hb-week-note"></span>
+          </div>
+        </div>
+      </div>
       <div class="hoje-card hoje-ranking-card">
         <div class="hoje-card-head">
           <h3><span data-icon="award"></span> Ranking da semana</h3>

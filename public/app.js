@@ -2711,7 +2711,98 @@ async function loadHojeData() {
     api('GET', `/api/calorias?date=${today}`),
   ]);
   renderHoje(plan, logs, gami, tstats, wcfg, wint, ranking, kcal);
+  loadHojeBalance();
 }
+
+// Balanço energético do dia e da semana (mesma conta da aba Dieta)
+async function loadHojeBalance() {
+  const dates = weekDates();
+  try {
+    const [rep, burn] = await Promise.all([
+      api('GET', `/api/diet-report?start=${dates[0]}`),
+      api('GET', `/api/calorias/periodo?start=${dates[0]}&end=${dates[6]}`),
+    ]);
+    renderHojeBalance(rep, burn);
+  } catch { /* card é opcional */ }
+}
+
+function renderHojeBalance(rep, burn) {
+  const fmtBR = n => Number(n).toLocaleString('pt-BR');
+  const today = todayStr();
+  const days = energyBalanceDays(rep.days, burn);
+  const d = days.find(x => x.date === today);
+  const logged = days.filter(x => x.saldo != null);
+  const noProfile = !(burn && burn.basal > 0);
+
+  // ---- Hoje ----
+  const valEl = document.getElementById('hb-today-val');
+  const subEl = document.getElementById('hb-today-sub');
+  const noteEl = document.getElementById('hb-today-note');
+  const bars = document.getElementById('hb-today-bars');
+  valEl.className = 'hb-big';
+  if (noProfile) {
+    valEl.textContent = '—';
+    subEl.textContent = 'Cadastre peso, sexo, idade e altura no perfil para ver o déficit.';
+    bars.style.display = 'none';
+    noteEl.textContent = '';
+  } else if (!d || d.saldo == null) {
+    valEl.textContent = '—';
+    subEl.textContent = 'Registre as refeições de hoje na aba Dieta para ver o déficit.';
+    bars.style.display = 'none';
+    noteEl.textContent = `Gasto previsto hoje: ~${fmtBR(d ? d.gasto : 0)} kcal (${fmtBR(d ? d.rotina : 0)} de rotina + ${fmtBR(d ? d.treino : 0)} de treino).`;
+  } else {
+    valEl.textContent = fmtSignedBR(d.saldo) + ' kcal';
+    valEl.classList.add(d.saldo < 0 ? 'neg' : 'pos');
+    document.getElementById('hb-today-label').textContent = d.saldo < 0 ? 'Déficit de hoje' : d.saldo > 0 ? 'Superávit de hoje' : 'Hoje';
+    subEl.textContent = '';
+    bars.style.display = '';
+    const max = Math.max(d.kcal, d.gasto, 1);
+    document.getElementById('hb-bar-in').style.width = `${(d.kcal / max) * 100}%`;
+    document.getElementById('hb-bar-out').style.width = `${(d.gasto / max) * 100}%`;
+    document.getElementById('hb-bar-in-val').textContent = fmtBR(Math.round(d.kcal));
+    document.getElementById('hb-bar-out-val').textContent = '~' + fmtBR(d.gasto);
+    noteEl.textContent = `Gasto: ${fmtBR(d.basal)} em repouso × ${String(DAILY_ACTIVITY_FACTOR).replace('.', ',')} de rotina + ${fmtBR(d.treino)} de treino. Estimativa (±25%).`;
+  }
+
+  // ---- Semana ----
+  const weekVal = document.getElementById('hb-week-val');
+  const weekNote = document.getElementById('hb-week-note');
+  const daysEl = document.getElementById('hb-week-days');
+  weekVal.className = 'hb-week-total';
+  daysEl.innerHTML = '';
+  if (noProfile || !logged.length) {
+    weekVal.textContent = '—';
+    weekNote.textContent = noProfile ? '' : 'Nenhum dia da semana com refeição registrada ainda.';
+  } else {
+    const total = logged.reduce((a, x) => a + x.saldo, 0);
+    weekVal.textContent = fmtSignedBR(total) + ' kcal';
+    weekVal.classList.add(total < 0 ? 'neg' : total > 0 ? 'pos' : '');
+    const avg = Math.round(total / logged.length);
+    const fat = (Math.abs(total) / 7700).toFixed(2).replace('.', ',');
+    weekNote.textContent = `${fmtSignedBR(avg)} kcal/dia em ${logged.length} dia${logged.length === 1 ? '' : 's'} registrado${logged.length === 1 ? '' : 's'} · equivale a ${total <= 0 ? '−' : '+'}${fat} kg de gordura.`;
+  }
+  const WD = ['S', 'T', 'Q', 'Q', 'S', 'S', 'D'];
+  const WDL = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+  const scale = Math.max(...days.map(x => Math.abs(x.saldo || 0)), 300);
+  days.forEach((x, i) => {
+    const col = document.createElement('div');
+    const future = x.date > today;
+    col.className = 'hb-day' + (x.saldo == null ? (future ? ' future' : ' empty') : x.saldo < 0 ? ' neg' : ' pos') + (x.date === today ? ' today' : '');
+    const h = x.saldo == null ? 0 : Math.max(4, (Math.abs(x.saldo) / scale) * 34);
+    col.innerHTML = `
+      <span class="hb-day-val">${x.saldo == null ? '' : fmtSignedBR(x.saldo)}</span>
+      <div class="hb-day-track"><div class="hb-day-bar" style="height:${h}px"></div></div>
+      <span class="hb-day-lbl">${WD[i]}</span>`;
+    col.title = x.saldo == null
+      ? `${WDL[i]} · ${future ? 'ainda não chegou' : 'sem refeição registrada'}`
+      : `${WDL[i]} · ${fmtBR(Math.round(x.kcal))} consumidas − ${fmtBR(x.gasto)} gastas (${fmtBR(x.treino)} no treino)`;
+    daysEl.appendChild(col);
+  });
+}
+
+document.getElementById('btn-hoje-dieta').addEventListener('click', () => {
+  document.querySelector('.nav-btn[data-tab="dieta"]').click();
+});
 
 function renderHoje(plan, logs, gami, tstats, wcfg, wint, ranking, kcal) {
   const now = new Date();
@@ -3945,18 +4036,26 @@ async function loadDietReport() {
 // Só conta dias com refeição registrada; sem registro o "déficit" seria falso.
 const DAILY_ACTIVITY_FACTOR = 1.2; // rotina leve fora do treino (sentado, deslocamentos)
 
-function renderEnergyBalance(rep, burn, isDia) {
-  const fmtBR = n => Number(n).toLocaleString('pt-BR');
-  const fmtSigned = n => (n > 0 ? '+' : n < 0 ? '−' : '') + fmtBR(Math.abs(Math.round(n)));
+// Calcula, por dia, consumo × gasto (repouso × rotina + treino) e o saldo.
+// saldo null = dia sem refeição registrada (não entra em soma nenhuma).
+function energyBalanceDays(repDays, burn) {
   const basal = burn && burn.basal > 0 ? burn.basal : 0;
   const burnByDate = {};
   ((burn && burn.days) || []).forEach(d => { burnByDate[d.date] = d.kcal; });
-
-  const days = rep.days.map(d => {
+  return repDays.map(d => {
     const treino = burnByDate[d.date] || 0;
-    const gasto = basal > 0 ? Math.round(basal * DAILY_ACTIVITY_FACTOR) + treino : 0;
-    return { date: d.date, kcal: d.kcal, treino, gasto, saldo: d.kcal > 0 && gasto > 0 ? Math.round(d.kcal) - gasto : null };
+    const rotina = basal > 0 ? Math.round(basal * DAILY_ACTIVITY_FACTOR) : 0;
+    const gasto = rotina + treino;
+    return { date: d.date, kcal: d.kcal, treino, rotina, basal, gasto, saldo: d.kcal > 0 && gasto > 0 ? Math.round(d.kcal) - gasto : null };
   });
+}
+const fmtSignedBR = n => (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(Math.round(n)).toLocaleString('pt-BR');
+
+function renderEnergyBalance(rep, burn, isDia) {
+  const fmtBR = n => Number(n).toLocaleString('pt-BR');
+  const fmtSigned = fmtSignedBR;
+  const basal = burn && burn.basal > 0 ? burn.basal : 0;
+  const days = energyBalanceDays(rep.days, burn);
   const logged = days.filter(d => d.saldo != null);
   const totalGasto = logged.reduce((a, d) => a + d.gasto, 0);
   const totalSaldo = logged.reduce((a, d) => a + d.saldo, 0);
