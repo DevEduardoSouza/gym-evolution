@@ -681,6 +681,7 @@
         <input type="search" id="food-search" class="library-search" placeholder="Buscar alimento (ex: arroz, frango...)" autocomplete="off">
         <div id="food-results" class="food-results"></div>
         <button type="button" id="btn-food-online" class="btn-secondary food-online-btn" style="display:none">🌐 Buscar online (produtos e marcas)</button>
+        <button type="button" id="btn-food-quick" class="btn-secondary food-quick-btn">🔢 Só os números (sem escolher alimento)</button>
         <div class="form-actions">
           <button type="button" id="btn-food-custom" class="btn-secondary"><span data-icon="plus"></span> Criar alimento</button>
           <button type="button" id="btn-food-close" class="btn-secondary">Fechar</button>
@@ -716,6 +717,25 @@
         <div class="form-actions">
           <button type="button" id="btn-cf-back" class="btn-secondary">Voltar</button>
           <button type="submit" class="btn-primary">Salvar alimento</button>
+        </div>
+      </form>
+
+      <form id="food-step-quick" style="display:none">
+        <p class="food-sel-per100">Já sabe os números? Joga eles direto — nada vai pra biblioteca.</p>
+        <div class="form-group">
+          <label for="qf-label">Descrição <small>(opcional)</small></label>
+          <input type="text" id="qf-label" maxlength="80" placeholder="Ex: Marmita da vó, prato do rodízio...">
+        </div>
+        <div class="cf-grid">
+          <div class="form-group"><label for="qf-kcal">Calorias (kcal)</label><input type="number" id="qf-kcal" min="0" step="1" inputmode="decimal" required></div>
+          <div class="form-group"><label for="qf-prot">Proteína (g)</label><input type="number" id="qf-prot" min="0" step="0.1" inputmode="decimal" value="0"></div>
+          <div class="form-group"><label for="qf-carb">Carboidrato (g)</label><input type="number" id="qf-carb" min="0" step="0.1" inputmode="decimal" value="0"></div>
+          <div class="form-group"><label for="qf-fat">Gordura (g)</label><input type="number" id="qf-fat" min="0" step="0.1" inputmode="decimal" value="0"></div>
+        </div>
+        <p class="food-preview" id="qf-preview"></p>
+        <div class="form-actions">
+          <button type="button" id="btn-qf-back" class="btn-secondary">Voltar</button>
+          <button type="submit" class="btn-primary">Lançar</button>
         </div>
       </form>
     </div>

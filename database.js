@@ -323,6 +323,19 @@ db.exec(`
   )
 `);
 
+// Lançamento rápido: entrada sem alimento da biblioteca (food_id = 0), com os
+// macros digitados direto. Guardamos os valores como se fossem "por 100 g" e
+// gravamos grams = 100, então toda conta existente (valor * grams / 100) continua valendo.
+(function migrateQuickMeals() {
+  const cols = tableColumns('meal_log');
+  if (cols.includes('label')) return;
+  db.exec('ALTER TABLE meal_log ADD COLUMN label TEXT');
+  db.exec('ALTER TABLE meal_log ADD COLUMN kcal REAL');
+  db.exec('ALTER TABLE meal_log ADD COLUMN protein_g REAL');
+  db.exec('ALTER TABLE meal_log ADD COLUMN carb_g REAL');
+  db.exec('ALTER TABLE meal_log ADD COLUMN fat_g REAL');
+})();
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS diet_config (
     user_id INTEGER PRIMARY KEY,

@@ -4765,6 +4765,9 @@ button, a, input, select, textarea, label, canvas,
 .rep-food-total { border-top: 2px solid var(--card-3); }
 .rep-food-total .rf-name { color: #fff; font-weight: 700; }
 .food-online-btn { width: 100%; margin-bottom: 10px; }
+.food-quick-btn { width: 100%; margin-bottom: 10px; }
+.de-tag { opacity: 0.65; font-size: 0.75rem; }
+.food-preview.qf-warn { color: #ff9f0a; }
 
 /* Metas da dieta (estilo FatSecret) + filtro Hoje/Semana do relatório */
 .dc-section {

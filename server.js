@@ -1355,12 +1355,14 @@ app.get('/api/meals', (req, res) => {
   const uid = req.session.userId;
   const date = String(req.query.date || new Date().toLocaleDateString('en-CA'));
   const entries = db.prepare(`
-    SELECT m.id, m.meal, m.grams, f.id AS food_id, f.name,
-           ROUND(f.kcal * m.grams / 100, 1) AS kcal,
-           ROUND(f.protein_g * m.grams / 100, 1) AS protein_g,
-           ROUND(f.carb_g * m.grams / 100, 1) AS carb_g,
-           ROUND(f.fat_g * m.grams / 100, 1) AS fat_g
-    FROM meal_log m JOIN food_library f ON f.id = m.food_id
+    SELECT m.id, m.meal, m.grams, m.food_id,
+           COALESCE(f.name, m.label, 'Lançamento rápido') AS name,
+           CASE WHEN f.id IS NULL THEN 1 ELSE 0 END AS quick,
+           ROUND(COALESCE(f.kcal, m.kcal, 0) * m.grams / 100, 1) AS kcal,
+           ROUND(COALESCE(f.protein_g, m.protein_g, 0) * m.grams / 100, 1) AS protein_g,
+           ROUND(COALESCE(f.carb_g, m.carb_g, 0) * m.grams / 100, 1) AS carb_g,
+           ROUND(COALESCE(f.fat_g, m.fat_g, 0) * m.grams / 100, 1) AS fat_g
+    FROM meal_log m LEFT JOIN food_library f ON f.id = m.food_id
     WHERE m.user_id = ? AND m.date = ?
     ORDER BY m.id
   `).all(uid, date);
@@ -1379,6 +1381,26 @@ app.post('/api/meals', (req, res) => {
   const uid = req.session.userId;
   const date = String(req.body.date || '').trim() || new Date().toLocaleDateString('en-CA');
   const meal = MEALS.includes(req.body.meal) ? req.body.meal : 'almoco';
+
+  // Lançamento rápido: sem alimento da biblioteca, só os números já prontos.
+  // Grava grams = 100 para que a conta "valor * grams / 100" devolva o valor digitado.
+  if (req.body.quick) {
+    const num = v => Math.max(0, Math.min(20000, +v || 0));
+    const kcal = num(req.body.kcal);
+    const prot = num(req.body.protein_g);
+    const carb = num(req.body.carb_g);
+    const fat = num(req.body.fat_g);
+    if (kcal <= 0 && prot <= 0 && carb <= 0 && fat <= 0) {
+      return res.status(400).json({ error: 'Informe pelo menos as calorias' });
+    }
+    const label = String(req.body.label || '').trim().slice(0, 80) || 'Lançamento rápido';
+    db.prepare(`
+      INSERT INTO meal_log (user_id, date, meal, food_id, grams, label, kcal, protein_g, carb_g, fat_g)
+      VALUES (?, ?, ?, 0, 100, ?, ?, ?, ?, ?)
+    `).run(uid, date, meal, label, kcal, prot, carb, fat);
+    return res.status(201).json({ success: true });
+  }
+
   const grams = +req.body.grams;
   const foodId = +req.body.food_id;
   if (!(grams > 0)) return res.status(400).json({ error: 'Quantidade em gramas inválida' });
@@ -1465,8 +1487,13 @@ app.get('/api/diet-report', (req, res) => {
   const end = dates[dates.length - 1];
 
   const rows = db.prepare(`
-    SELECT m.date, m.meal, m.grams, f.name, f.kcal, f.protein_g, f.carb_g, f.fat_g
-    FROM meal_log m JOIN food_library f ON f.id = m.food_id
+    SELECT m.date, m.meal, m.grams,
+           COALESCE(f.name, m.label, 'Lançamento rápido') AS name,
+           COALESCE(f.kcal, m.kcal, 0) AS kcal,
+           COALESCE(f.protein_g, m.protein_g, 0) AS protein_g,
+           COALESCE(f.carb_g, m.carb_g, 0) AS carb_g,
+           COALESCE(f.fat_g, m.fat_g, 0) AS fat_g
+    FROM meal_log m LEFT JOIN food_library f ON f.id = m.food_id
     WHERE m.user_id = ? AND m.date >= ? AND m.date <= ?
   `).all(uid, start, end);
 
@@ -1826,11 +1853,11 @@ function buildAiContext(uid) {
   const dcfg = db.prepare('SELECT * FROM diet_config WHERE user_id = ?').get(uid);
   const d7 = db.prepare(`
     SELECT COUNT(DISTINCT m.date) days,
-      COALESCE(SUM(f.kcal * m.grams / 100), 0) kcal,
-      COALESCE(SUM(f.protein_g * m.grams / 100), 0) prot,
-      COALESCE(SUM(f.carb_g * m.grams / 100), 0) carb,
-      COALESCE(SUM(f.fat_g * m.grams / 100), 0) fat
-    FROM meal_log m JOIN food_library f ON f.id = m.food_id
+      COALESCE(SUM(COALESCE(f.kcal, m.kcal, 0) * m.grams / 100), 0) kcal,
+      COALESCE(SUM(COALESCE(f.protein_g, m.protein_g, 0) * m.grams / 100), 0) prot,
+      COALESCE(SUM(COALESCE(f.carb_g, m.carb_g, 0) * m.grams / 100), 0) carb,
+      COALESCE(SUM(COALESCE(f.fat_g, m.fat_g, 0) * m.grams / 100), 0) fat
+    FROM meal_log m LEFT JOIN food_library f ON f.id = m.food_id
     WHERE m.user_id = ? AND m.date >= ?
   `).get(uid, daysAgo(7));
   if (dcfg) {

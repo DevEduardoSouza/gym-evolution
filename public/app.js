@@ -4395,8 +4395,8 @@ function renderDieta() {
       const row = document.createElement('div');
       row.className = 'diet-entry';
       row.innerHTML = `
-        <span class="de-name">${esc(e.name)}</span>
-        <span class="de-qty">${fmt1(e.grams)} g</span>
+        <span class="de-name">${esc(e.name)}${e.quick ? ' <small class="de-tag">🔢</small>' : ''}</span>
+        <span class="de-qty">${e.quick ? '—' : fmt1(e.grams) + ' g'}</span>
         <span class="de-kcal">${Math.round(e.kcal)} kcal · P ${fmt1(e.protein_g)}</span>
         <button class="de-del" title="Remover"><span data-icon="trash"></span></button>
       `;
@@ -4419,6 +4419,7 @@ function foodModalStep(step) {
   document.getElementById('food-step-search').style.display = step === 'search' ? '' : 'none';
   document.getElementById('food-step-qty').style.display = step === 'qty' ? '' : 'none';
   document.getElementById('food-step-custom').style.display = step === 'custom' ? '' : 'none';
+  document.getElementById('food-step-quick').style.display = step === 'quick' ? '' : 'none';
 }
 
 function openFoodModal(meal) {
@@ -4550,6 +4551,66 @@ document.getElementById('food-step-custom').addEventListener('submit', async e =
     fat_g: +document.getElementById('cf-fat').value || 0,
   });
   if (food && food.id) goToQtyStep(food);
+});
+
+// ---- Lançamento rápido: só os números, sem escolher alimento ----
+function qfVals() {
+  return {
+    kcal: +document.getElementById('qf-kcal').value || 0,
+    prot: +document.getElementById('qf-prot').value || 0,
+    carb: +document.getElementById('qf-carb').value || 0,
+    fat: +document.getElementById('qf-fat').value || 0,
+  };
+}
+
+// Mostra o que os macros dão em kcal — ajuda a pegar número errado antes de lançar
+function qfRefresh() {
+  const v = qfVals();
+  const fromMacros = Math.round(v.prot * 4 + v.carb * 4 + v.fat * 9);
+  const el = document.getElementById('qf-preview');
+  if (!fromMacros) {
+    el.textContent = v.kcal ? `Vai entrar como ${Math.round(v.kcal)} kcal, sem macros.` : '';
+    el.classList.remove('qf-warn');
+    return;
+  }
+  el.textContent = `Os macros somam ${fromMacros} kcal` + (v.kcal ? ` · você digitou ${Math.round(v.kcal)} kcal` : ' — deixe as calorias em branco para usar esse valor');
+  el.classList.toggle('qf-warn', v.kcal > 0 && Math.abs(v.kcal - fromMacros) > Math.max(60, fromMacros * 0.15));
+}
+
+document.getElementById('btn-food-quick').addEventListener('click', () => {
+  const q = document.getElementById('food-search').value.trim();
+  document.getElementById('qf-label').value = q;
+  ['qf-kcal', 'qf-prot', 'qf-carb', 'qf-fat'].forEach((id, i) => {
+    document.getElementById(id).value = i === 0 ? '' : 0;
+  });
+  document.getElementById('qf-preview').textContent = '';
+  foodModalStep('quick');
+  setTimeout(() => document.getElementById('qf-kcal').focus(), 50);
+});
+document.getElementById('btn-qf-back').addEventListener('click', () => foodModalStep('search'));
+['qf-kcal', 'qf-prot', 'qf-carb', 'qf-fat'].forEach(id => {
+  document.getElementById(id).addEventListener('input', qfRefresh);
+});
+
+document.getElementById('food-step-quick').addEventListener('submit', async e => {
+  e.preventDefault();
+  const v = qfVals();
+  const kcal = v.kcal || Math.round(v.prot * 4 + v.carb * 4 + v.fat * 9);
+  if (!(kcal > 0)) return toastMsg('Coloque as calorias ou pelo menos um macro.');
+  const r = await api('POST', '/api/meals', {
+    date: todayStr(),
+    meal: foodModalMeal,
+    quick: true,
+    label: document.getElementById('qf-label').value.trim(),
+    kcal,
+    protein_g: v.prot,
+    carb_g: v.carb,
+    fat_g: v.fat,
+  });
+  if (r && r.error) return toastMsg(r.error);
+  modalFood.classList.add('hidden');
+  toastMsg('Lançado! 🔢');
+  loadDietaData();
 });
 
 // ---- Metas da dieta (estilo FatSecret: % de macros com equivalente em gramas) ----
