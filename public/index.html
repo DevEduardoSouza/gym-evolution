@@ -41,6 +41,9 @@
         <button class="nav-btn" data-tab="dieta">
           <span class="nav-icon" data-icon="apple"></span><span class="nav-label">Dieta</span>
         </button>
+        <button class="nav-btn" data-tab="balanco">
+          <span class="nav-icon" data-icon="chart"></span><span class="nav-label">Balanço</span>
+        </button>
         <button class="nav-btn" data-tab="treino">
           <span class="nav-icon" data-icon="calendar"></span><span class="nav-label">Frequência</span>
         </button>
@@ -134,32 +137,6 @@
               <input type="time" id="rem-treino-hora" value="18:00">
             </label>
             <p class="profile-hint" id="rem-hint">Os avisos aparecem com o app aberto no navegador.</p>
-          </div>
-        </div>
-      </div>
-      <div class="hoje-card hoje-balance-card" id="hoje-balance">
-        <div class="hoje-card-head">
-          <h3>⚖️ Balanço energético</h3>
-          <button id="btn-hoje-dieta" class="btn-secondary btn-sm">Registrar refeições</button>
-        </div>
-        <div class="hb-grid">
-          <div class="hb-today">
-            <span class="hb-label" id="hb-today-label">Hoje</span>
-            <span class="hb-big" id="hb-today-val">—</span>
-            <span class="hb-sub" id="hb-today-sub">Registre as refeições de hoje na aba Dieta para ver o déficit.</span>
-            <div class="hb-bars" id="hb-today-bars" style="display:none">
-              <div class="hb-bar-row"><span>Consumido</span><div class="hb-bar"><div class="hb-bar-fill in" id="hb-bar-in"></div></div><b id="hb-bar-in-val">0</b></div>
-              <div class="hb-bar-row"><span>Gasto</span><div class="hb-bar"><div class="hb-bar-fill out" id="hb-bar-out"></div></div><b id="hb-bar-out-val">0</b></div>
-            </div>
-            <span class="hb-note" id="hb-today-note"></span>
-          </div>
-          <div class="hb-week">
-            <div class="hb-week-head">
-              <span class="hb-label">Semana</span>
-              <span class="hb-week-total" id="hb-week-val">—</span>
-            </div>
-            <div class="hb-week-days" id="hb-week-days"></div>
-            <span class="hb-note" id="hb-week-note"></span>
           </div>
         </div>
       </div>
@@ -309,6 +286,66 @@
         </div>
       </div>
       <div id="heatmap-tooltip" class="heatmap-tooltip"></div>
+    </div>
+
+    <div id="tab-balanco" class="tab-panel">
+      <div class="bal-grid">
+        <div class="hoje-card bal-today-card">
+          <div class="hoje-card-head">
+            <h3>⚖️ <span id="hb-today-label">Hoje</span></h3>
+            <span class="table-hint" id="hb-today-date"></span>
+          </div>
+          <span class="hb-big" id="hb-today-val">—</span>
+          <span class="hb-sub" id="hb-today-sub">Registre as refeições de hoje na aba Dieta para ver o déficit.</span>
+          <div class="hb-bars" id="hb-today-bars" style="display:none">
+            <div class="hb-bar-row"><span>Consumido</span><div class="hb-bar"><div class="hb-bar-fill in" id="hb-bar-in"></div></div><b id="hb-bar-in-val">0</b></div>
+            <div class="hb-bar-row"><span>Gasto</span><div class="hb-bar"><div class="hb-bar-fill out" id="hb-bar-out"></div></div><b id="hb-bar-out-val">0</b></div>
+          </div>
+          <div class="bal-breakdown" id="bal-breakdown"></div>
+          <span class="hb-note" id="hb-today-note"></span>
+          <div class="bal-actions">
+            <button id="btn-bal-dieta" class="btn-primary btn-sm">Registrar refeições</button>
+            <button id="btn-bal-treino" class="btn-secondary btn-sm">Registrar treino</button>
+          </div>
+        </div>
+        <div class="hoje-card bal-how-card">
+          <h3>Como é calculado</h3>
+          <ul class="bal-how">
+            <li><b>Consumido</b>: soma das refeições registradas na aba Dieta.</li>
+            <li><b>Repouso</b>: gasto basal pela fórmula de Mifflin-St Jeor, com peso, sexo, idade e altura do perfil (<span id="bal-basal">—</span> kcal/dia).</li>
+            <li><b>Rotina</b>: repouso × 1,2, o mínimo de quem passa o dia sentado fora do treino.</li>
+            <li><b>Treino</b>: estimativa das calorias dos exercícios marcados e do cardio com tempo e distância.</li>
+            <li><b>Saldo</b>: consumido − (rotina + treino). Negativo é déficit, positivo é superávit. Margem de ±25%.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="hoje-card bal-week-card">
+        <div class="diet-report-head">
+          <h3>Semana</h3>
+          <div class="week-nav">
+            <button type="button" id="bal-prev" class="btn-secondary btn-sm" title="Semana anterior">‹</button>
+            <span id="bal-week-label">Essa semana</span>
+            <button type="button" id="bal-next" class="btn-secondary btn-sm" title="Próxima semana">›</button>
+          </div>
+        </div>
+        <div class="report-hero">
+          <div class="report-stat"><b id="bal-w-net" class="hb-week-total">—</b><span id="bal-w-net-lbl">saldo da semana</span></div>
+          <div class="report-stat"><b id="bal-w-avg">—</b><span>média por dia</span></div>
+          <div class="report-stat"><b id="bal-w-in">—</b><span>consumido</span></div>
+          <div class="report-stat"><b id="bal-w-out">—</b><span>gasto total</span></div>
+          <div class="report-stat"><b id="bal-w-train" class="rep-burn">—</b><span>🔥 treino</span></div>
+          <div class="report-stat"><b id="bal-w-fat">—</b><span>gordura equivalente</span></div>
+        </div>
+        <div class="hb-week-days bal-week-days" id="hb-week-days"></div>
+        <span class="hb-note" id="hb-week-note"></span>
+        <div class="table-wrap bal-table-wrap">
+          <table class="bal-table">
+            <thead><tr><th>Dia</th><th>Consumido</th><th>Rotina</th><th>Treino</th><th>Gasto</th><th>Saldo</th></tr></thead>
+            <tbody id="bal-table-body"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
 
     <div id="tab-dieta" class="tab-panel">

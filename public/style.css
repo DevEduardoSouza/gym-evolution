@@ -3786,71 +3786,99 @@ body.anim-flip .ex-anim2 .f2 { opacity: 1; }
 /* Mini stats */
 .hoje-mini-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 
-/* Balanço energético (Hoje) */
-.hoje-balance-card { margin-bottom: 14px; }
-.hb-grid {
+/* ======== Aba Balanço (déficit / superávit) ======== */
+.bal-grid {
   display: grid;
-  grid-template-columns: 1fr 1.2fr;
-  gap: 22px;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 14px;
+  margin-bottom: 14px;
   align-items: stretch;
 }
-.hb-today { display: flex; flex-direction: column; gap: 6px; }
-.hb-label {
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
+.bal-today-card { display: flex; flex-direction: column; gap: 8px; }
 .hb-big {
-  font-size: 2.2rem;
+  font-size: 2.6rem;
   font-weight: 800;
   color: #fff;
   letter-spacing: -0.03em;
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
 }
-.hb-big.neg, .hb-week-total.neg, .hb-day.neg .hb-day-val { color: #30d158; }
-.hb-big.pos, .hb-week-total.pos, .hb-day.pos .hb-day-val { color: #ff453a; }
-.hb-sub { color: #8e8e93; font-size: 0.85rem; }
-.hb-note { color: var(--faint); font-size: 0.72rem; margin-top: 4px; }
-.hb-bars { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.hb-big.neg, .hb-week-total.neg, .hb-day.neg .hb-day-val, .bal-table tr.bal-neg td:last-child b { color: #30d158; }
+.hb-big.pos, .hb-week-total.pos, .hb-day.pos .hb-day-val, .bal-table tr.bal-pos td:last-child b { color: #ff453a; }
+.hb-sub { color: #8e8e93; font-size: 0.9rem; }
+.hb-note { color: var(--faint); font-size: 0.74rem; margin-top: 6px; display: block; }
+.hb-bars { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .hb-bar-row {
   display: grid;
-  grid-template-columns: 74px 1fr 58px;
+  grid-template-columns: 82px 1fr 64px;
   align-items: center;
-  gap: 8px;
-  font-size: 0.76rem;
+  gap: 10px;
+  font-size: 0.8rem;
   color: #8e8e93;
 }
 .hb-bar-row b { color: #fff; text-align: right; font-variant-numeric: tabular-nums; }
-.hb-bar { height: 8px; border-radius: 4px; background: var(--card-2); overflow: hidden; }
-.hb-bar-fill { height: 100%; border-radius: 4px; transition: width 0.6s ease; }
+.hb-bar { height: 10px; border-radius: 5px; background: var(--card-2); overflow: hidden; }
+.hb-bar-fill { height: 100%; border-radius: 5px; transition: width 0.6s ease; }
 .hb-bar-fill.in { background: #0a84ff; }
 .hb-bar-fill.out { background: #ff9f0a; }
-.hb-week { display: flex; flex-direction: column; gap: 8px; border-left: 1px solid var(--border-soft); padding-left: 22px; }
-.hb-week-head { display: flex; justify-content: space-between; align-items: baseline; }
-.hb-week-total { font-size: 1.25rem; font-weight: 800; color: #fff; font-variant-numeric: tabular-nums; }
+.bal-breakdown {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-top: 8px;
+}
+.bal-bd {
+  background: var(--card-2);
+  border-radius: 12px;
+  padding: 10px 8px;
+  text-align: center;
+}
+.bal-bd b { display: block; color: #fff; font-size: 0.95rem; font-variant-numeric: tabular-nums; }
+.bal-bd span { font-size: 0.68rem; color: #8e8e93; }
+.bal-actions { display: flex; gap: 8px; margin-top: auto; padding-top: 10px; flex-wrap: wrap; }
+.bal-how-card h3 { margin-bottom: 10px; }
+.bal-how { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.bal-how li { color: #8e8e93; font-size: 0.8rem; line-height: 1.45; padding-left: 12px; position: relative; }
+.bal-how li::before { content: ''; position: absolute; left: 0; top: 8px; width: 4px; height: 4px; border-radius: 50%; background: #48484c; }
+.bal-how li b { color: #fff; font-weight: 700; }
+.bal-week-card h3 { color: #fff; font-size: 1rem; font-weight: 700; }
+.hb-week-total { font-variant-numeric: tabular-nums; }
 .hb-week-days {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 6px;
+  gap: 8px;
   align-items: end;
+  margin-top: 6px;
 }
-.hb-day { display: flex; flex-direction: column; align-items: center; gap: 3px; }
-.hb-day-val { font-size: 0.64rem; font-weight: 700; min-height: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.hb-day-track { height: 36px; width: 100%; display: flex; align-items: flex-end; justify-content: center; }
-.hb-day-bar { width: 60%; max-width: 22px; border-radius: 4px 4px 2px 2px; background: #48484c; }
+.hb-day { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.hb-day-val { font-size: 0.7rem; font-weight: 700; min-height: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hb-day-track { height: 46px; width: 100%; display: flex; align-items: flex-end; justify-content: center; }
+.hb-day-bar { width: 60%; max-width: 30px; border-radius: 5px 5px 2px 2px; background: #48484c; }
 .hb-day.neg .hb-day-bar { background: #30d158; }
 .hb-day.pos .hb-day-bar { background: #ff453a; }
 .hb-day.empty .hb-day-bar, .hb-day.future .hb-day-bar { height: 3px !important; width: 60%; background: var(--card-3); }
-.hb-day-lbl { font-size: 0.68rem; color: var(--faint); font-weight: 600; }
+.hb-day-lbl { font-size: 0.7rem; color: var(--faint); font-weight: 600; white-space: nowrap; }
 .hb-day.today .hb-day-lbl { color: #fff; }
-@media (max-width: 720px) {
-  .hb-grid { grid-template-columns: 1fr; gap: 16px; }
-  .hb-week { border-left: none; padding-left: 0; border-top: 1px solid var(--border-soft); padding-top: 14px; }
-  .hb-big { font-size: 1.9rem; }
-  .hb-day-val { font-size: 0.58rem; }
+.bal-table-wrap { margin-top: 16px; overflow-x: auto; }
+.bal-table { width: 100%; min-width: 0; border-collapse: collapse; border-spacing: 0; font-size: 0.82rem; font-variant-numeric: tabular-nums; }
+.bal-table th { text-align: right; color: #8e8e93; font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 6px 8px; border-bottom: 1px solid var(--border-soft); }
+.bal-table td { text-align: right; padding: 9px 8px; border-bottom: 1px solid var(--border-soft); color: #d0d0d5; white-space: nowrap; }
+.bal-table th:first-child, .bal-table td:first-child { text-align: left; color: #fff; font-weight: 600; }
+.bal-table td small { color: var(--faint); font-weight: 500; margin-left: 4px; }
+.bal-table tr.bal-empty td { color: #6b6b72; }
+.bal-table tr.bal-empty td:last-child b { color: #6b6b72; font-weight: 500; font-size: 0.74rem; }
+.bal-table tr.bal-today td:first-child::after { content: ' · hoje'; color: #8e8e93; font-weight: 500; font-size: 0.72rem; }
+@media (max-width: 800px) {
+  .bal-grid { grid-template-columns: 1fr; }
+  .hb-big { font-size: 2.1rem; }
+  .bal-breakdown { grid-template-columns: repeat(2, 1fr); }
+  .hb-day-val { font-size: 0.62rem; }
+  .hb-day-lbl { font-size: 0.62rem; }
+  /* celular: só Dia, Consumido, Treino e Saldo */
+  .bal-table th:nth-child(3), .bal-table td:nth-child(3),
+  .bal-table th:nth-child(5), .bal-table td:nth-child(5) { display: none; }
+  .bal-table td, .bal-table th { padding-left: 4px; padding-right: 4px; }
+}
 }
 .hoje-mini-value.hoje-kcal { color: #ff9f0a; }
 .hoje-mini { display: flex; flex-direction: column; align-items: center; gap: 3px; }

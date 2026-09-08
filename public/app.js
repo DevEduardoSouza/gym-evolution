@@ -1102,6 +1102,7 @@ const TAB_TITLES = {
   medicoes: 'Corpo',
   agua: 'Água',
   dieta: 'Dieta',
+  balanco: 'Balanço',
   treino: 'Frequência',
   ciclo: 'Treino',
   ia: 'Coach IA',
@@ -1145,6 +1146,7 @@ document.querySelectorAll('.nav-btn[data-tab]').forEach(btn => {
     if (tab === 'medicoes') loadPhotos();
     if (tab === 'agua') loadWaterData();
     if (tab === 'dieta') loadDietaData();
+    if (tab === 'balanco') loadBalanco();
     if (tab === 'treino') loadTreinoData();
     if (tab === 'ciclo') loadCicloData();
     if (tab === 'ia') initAiChat();
@@ -2711,98 +2713,9 @@ async function loadHojeData() {
     api('GET', `/api/calorias?date=${today}`),
   ]);
   renderHoje(plan, logs, gami, tstats, wcfg, wint, ranking, kcal);
-  loadHojeBalance();
 }
 
-// Balanço energético do dia e da semana (mesma conta da aba Dieta)
-async function loadHojeBalance() {
-  const dates = weekDates();
-  try {
-    const [rep, burn] = await Promise.all([
-      api('GET', `/api/diet-report?start=${dates[0]}`),
-      api('GET', `/api/calorias/periodo?start=${dates[0]}&end=${dates[6]}`),
-    ]);
-    renderHojeBalance(rep, burn);
-  } catch { /* card é opcional */ }
-}
 
-function renderHojeBalance(rep, burn) {
-  const fmtBR = n => Number(n).toLocaleString('pt-BR');
-  const today = todayStr();
-  const days = energyBalanceDays(rep.days, burn);
-  const d = days.find(x => x.date === today);
-  const logged = days.filter(x => x.saldo != null);
-  const noProfile = !(burn && burn.basal > 0);
-
-  // ---- Hoje ----
-  const valEl = document.getElementById('hb-today-val');
-  const subEl = document.getElementById('hb-today-sub');
-  const noteEl = document.getElementById('hb-today-note');
-  const bars = document.getElementById('hb-today-bars');
-  valEl.className = 'hb-big';
-  if (noProfile) {
-    valEl.textContent = '—';
-    subEl.textContent = 'Cadastre peso, sexo, idade e altura no perfil para ver o déficit.';
-    bars.style.display = 'none';
-    noteEl.textContent = '';
-  } else if (!d || d.saldo == null) {
-    valEl.textContent = '—';
-    subEl.textContent = 'Registre as refeições de hoje na aba Dieta para ver o déficit.';
-    bars.style.display = 'none';
-    noteEl.textContent = `Gasto previsto hoje: ~${fmtBR(d ? d.gasto : 0)} kcal (${fmtBR(d ? d.rotina : 0)} de rotina + ${fmtBR(d ? d.treino : 0)} de treino).`;
-  } else {
-    valEl.textContent = fmtSignedBR(d.saldo) + ' kcal';
-    valEl.classList.add(d.saldo < 0 ? 'neg' : 'pos');
-    document.getElementById('hb-today-label').textContent = d.saldo < 0 ? 'Déficit de hoje' : d.saldo > 0 ? 'Superávit de hoje' : 'Hoje';
-    subEl.textContent = '';
-    bars.style.display = '';
-    const max = Math.max(d.kcal, d.gasto, 1);
-    document.getElementById('hb-bar-in').style.width = `${(d.kcal / max) * 100}%`;
-    document.getElementById('hb-bar-out').style.width = `${(d.gasto / max) * 100}%`;
-    document.getElementById('hb-bar-in-val').textContent = fmtBR(Math.round(d.kcal));
-    document.getElementById('hb-bar-out-val').textContent = '~' + fmtBR(d.gasto);
-    noteEl.textContent = `Gasto: ${fmtBR(d.basal)} em repouso × ${String(DAILY_ACTIVITY_FACTOR).replace('.', ',')} de rotina + ${fmtBR(d.treino)} de treino. Estimativa (±25%).`;
-  }
-
-  // ---- Semana ----
-  const weekVal = document.getElementById('hb-week-val');
-  const weekNote = document.getElementById('hb-week-note');
-  const daysEl = document.getElementById('hb-week-days');
-  weekVal.className = 'hb-week-total';
-  daysEl.innerHTML = '';
-  if (noProfile || !logged.length) {
-    weekVal.textContent = '—';
-    weekNote.textContent = noProfile ? '' : 'Nenhum dia da semana com refeição registrada ainda.';
-  } else {
-    const total = logged.reduce((a, x) => a + x.saldo, 0);
-    weekVal.textContent = fmtSignedBR(total) + ' kcal';
-    weekVal.classList.add(total < 0 ? 'neg' : total > 0 ? 'pos' : '');
-    const avg = Math.round(total / logged.length);
-    const fat = (Math.abs(total) / 7700).toFixed(2).replace('.', ',');
-    weekNote.textContent = `${fmtSignedBR(avg)} kcal/dia em ${logged.length} dia${logged.length === 1 ? '' : 's'} registrado${logged.length === 1 ? '' : 's'} · equivale a ${total <= 0 ? '−' : '+'}${fat} kg de gordura.`;
-  }
-  const WD = ['S', 'T', 'Q', 'Q', 'S', 'S', 'D'];
-  const WDL = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
-  const scale = Math.max(...days.map(x => Math.abs(x.saldo || 0)), 300);
-  days.forEach((x, i) => {
-    const col = document.createElement('div');
-    const future = x.date > today;
-    col.className = 'hb-day' + (x.saldo == null ? (future ? ' future' : ' empty') : x.saldo < 0 ? ' neg' : ' pos') + (x.date === today ? ' today' : '');
-    const h = x.saldo == null ? 0 : Math.max(4, (Math.abs(x.saldo) / scale) * 34);
-    col.innerHTML = `
-      <span class="hb-day-val">${x.saldo == null ? '' : fmtSignedBR(x.saldo)}</span>
-      <div class="hb-day-track"><div class="hb-day-bar" style="height:${h}px"></div></div>
-      <span class="hb-day-lbl">${WD[i]}</span>`;
-    col.title = x.saldo == null
-      ? `${WDL[i]} · ${future ? 'ainda não chegou' : 'sem refeição registrada'}`
-      : `${WDL[i]} · ${fmtBR(Math.round(x.kcal))} consumidas − ${fmtBR(x.gasto)} gastas (${fmtBR(x.treino)} no treino)`;
-    daysEl.appendChild(col);
-  });
-}
-
-document.getElementById('btn-hoje-dieta').addEventListener('click', () => {
-  document.querySelector('.nav-btn[data-tab="dieta"]').click();
-});
 
 function renderHoje(plan, logs, gami, tstats, wcfg, wint, ranking, kcal) {
   const now = new Date();
@@ -4050,6 +3963,151 @@ function energyBalanceDays(repDays, burn) {
   });
 }
 const fmtSignedBR = n => (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(Math.round(n)).toLocaleString('pt-BR');
+
+// ======== ABA BALANÇO (déficit / superávit) ========
+let balOffset = 0; // semanas em relação à atual
+
+async function loadBalanco() {
+  const today = todayStr();
+  const monday = dietMondayStr(balOffset);
+  const sunday = (() => { const d = new Date(monday + 'T12:00:00'); d.setDate(d.getDate() + 6); return d.toLocaleDateString('en-CA'); })();
+  try {
+    const [repDay, burnDay, repWeek, burnWeek] = await Promise.all([
+      api('GET', `/api/diet-report?start=${today}&days=1`),
+      api('GET', `/api/calorias/periodo?start=${today}&end=${today}`),
+      api('GET', `/api/diet-report?start=${monday}`),
+      api('GET', `/api/calorias/periodo?start=${monday}&end=${sunday}`),
+    ]);
+    renderBalancoToday(repDay, burnDay);
+    renderBalancoWeek(repWeek, burnWeek);
+  } catch (e) {
+    console.error(e);
+    toastMsg('Não foi possível carregar o balanço');
+  }
+}
+
+function renderBalancoToday(rep, burn) {
+  const fmtBR = n => Number(n).toLocaleString('pt-BR');
+  const today = todayStr();
+  const d = energyBalanceDays(rep.days, burn).find(x => x.date === today);
+  const noProfile = !(burn && burn.basal > 0);
+  document.getElementById('hb-today-date').textContent = formatDate(today);
+  document.getElementById('bal-basal').textContent = noProfile ? '—' : fmtBR(burn.basal);
+
+  const labelEl = document.getElementById('hb-today-label');
+  const valEl = document.getElementById('hb-today-val');
+  const subEl = document.getElementById('hb-today-sub');
+  const noteEl = document.getElementById('hb-today-note');
+  const bars = document.getElementById('hb-today-bars');
+  const brk = document.getElementById('bal-breakdown');
+  valEl.className = 'hb-big';
+  brk.innerHTML = '';
+  if (noProfile) {
+    labelEl.textContent = 'Hoje';
+    valEl.textContent = '—';
+    subEl.textContent = 'Cadastre peso, sexo, idade e altura no perfil para ver o déficit.';
+    bars.style.display = 'none';
+    noteEl.textContent = '';
+    return;
+  }
+  if (!d || d.saldo == null) {
+    labelEl.textContent = 'Hoje';
+    valEl.textContent = '—';
+    subEl.textContent = 'Registre as refeições de hoje na aba Dieta para ver o déficit.';
+    bars.style.display = 'none';
+    noteEl.textContent = `Gasto previsto hoje: ~${fmtBR(d ? d.gasto : 0)} kcal (${fmtBR(d ? d.rotina : 0)} de rotina + ${fmtBR(d ? d.treino : 0)} de treino).`;
+    return;
+  }
+  labelEl.textContent = d.saldo < 0 ? 'Déficit de hoje' : d.saldo > 0 ? 'Superávit de hoje' : 'Hoje';
+  valEl.textContent = fmtSignedBR(d.saldo) + ' kcal';
+  valEl.classList.add(d.saldo < 0 ? 'neg' : d.saldo > 0 ? 'pos' : '');
+  subEl.textContent = '';
+  bars.style.display = '';
+  const max = Math.max(d.kcal, d.gasto, 1);
+  document.getElementById('hb-bar-in').style.width = `${(d.kcal / max) * 100}%`;
+  document.getElementById('hb-bar-out').style.width = `${(d.gasto / max) * 100}%`;
+  document.getElementById('hb-bar-in-val').textContent = fmtBR(Math.round(d.kcal));
+  document.getElementById('hb-bar-out-val').textContent = '~' + fmtBR(d.gasto);
+  brk.innerHTML = `
+    <div class="bal-bd"><b>${fmtBR(d.basal)}</b><span>repouso</span></div>
+    <div class="bal-bd"><b>+${fmtBR(d.rotina - d.basal)}</b><span>rotina (×1,2)</span></div>
+    <div class="bal-bd"><b class="rep-burn">+${fmtBR(d.treino)}</b><span>treino</span></div>
+    <div class="bal-bd"><b>= ${fmtBR(d.gasto)}</b><span>gasto do dia</span></div>`;
+  noteEl.textContent = 'Estimativa com margem de ±25%. Serve para comparar dias, não para contabilidade exata.';
+}
+
+function renderBalancoWeek(rep, burn) {
+  const fmtBR = n => Number(n).toLocaleString('pt-BR');
+  const dm = s => `${s.slice(8, 10)}/${s.slice(5, 7)}`;
+  const today = todayStr();
+  const days = energyBalanceDays(rep.days, burn);
+  const logged = days.filter(x => x.saldo != null);
+  const noProfile = !(burn && burn.basal > 0);
+
+  document.getElementById('bal-week-label').textContent = balOffset === 0 ? 'Essa semana' : balOffset === -1 ? 'Semana passada' : `${dm(rep.start)} – ${dm(rep.end)}`;
+  document.getElementById('bal-next').disabled = balOffset >= 0;
+
+  const netEl = document.getElementById('bal-w-net');
+  netEl.className = 'hb-week-total';
+  const set = (id, v) => { document.getElementById(id).textContent = v; };
+  if (noProfile || !logged.length) {
+    set('bal-w-net', '—'); set('bal-w-avg', '—'); set('bal-w-in', '—'); set('bal-w-out', '—'); set('bal-w-train', '—'); set('bal-w-fat', '—');
+    document.getElementById('bal-w-net-lbl').textContent = 'saldo da semana';
+    document.getElementById('hb-week-note').textContent = noProfile ? 'Complete o perfil para ver o balanço.' : 'Nenhum dia desta semana com refeição registrada.';
+  } else {
+    const total = logged.reduce((a, x) => a + x.saldo, 0);
+    const inSum = logged.reduce((a, x) => a + Math.round(x.kcal), 0);
+    const outSum = logged.reduce((a, x) => a + x.gasto, 0);
+    const trainSum = logged.reduce((a, x) => a + x.treino, 0);
+    set('bal-w-net', fmtSignedBR(total));
+    netEl.classList.add(total < 0 ? 'neg' : total > 0 ? 'pos' : '');
+    document.getElementById('bal-w-net-lbl').textContent = total < 0 ? 'déficit da semana' : total > 0 ? 'superávit da semana' : 'saldo da semana';
+    set('bal-w-avg', fmtSignedBR(total / logged.length));
+    set('bal-w-in', fmtBR(inSum));
+    set('bal-w-out', '~' + fmtBR(outSum));
+    set('bal-w-train', '~' + fmtBR(trainSum));
+    set('bal-w-fat', `${total <= 0 ? '−' : '+'}${(Math.abs(total) / 7700).toFixed(2).replace('.', ',')} kg`);
+    document.getElementById('hb-week-note').textContent = `${logged.length} dia${logged.length === 1 ? '' : 's'} com refeição registrada. Dias sem registro não entram na conta.`;
+  }
+
+  // Barras por dia
+  const daysEl = document.getElementById('hb-week-days');
+  daysEl.innerHTML = '';
+  const WD = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+  const scale = Math.max(...days.map(x => Math.abs(x.saldo || 0)), 300);
+  days.forEach((x, i) => {
+    const col = document.createElement('div');
+    const future = x.date > today;
+    col.className = 'hb-day' + (x.saldo == null ? (future ? ' future' : ' empty') : x.saldo < 0 ? ' neg' : ' pos') + (x.date === today ? ' today' : '');
+    const h = x.saldo == null ? 0 : Math.max(4, (Math.abs(x.saldo) / scale) * 44);
+    col.innerHTML = `
+      <span class="hb-day-val">${x.saldo == null ? '' : fmtSignedBR(x.saldo)}</span>
+      <div class="hb-day-track"><div class="hb-day-bar" style="height:${h}px"></div></div>
+      <span class="hb-day-lbl">${WD[i]} ${+x.date.slice(8, 10)}</span>`;
+    daysEl.appendChild(col);
+  });
+
+  // Tabela
+  const tb = document.getElementById('bal-table-body');
+  tb.innerHTML = days.map((x, i) => {
+    const future = x.date > today;
+    const empty = x.saldo == null;
+    const cls = empty ? 'bal-empty' : x.saldo < 0 ? 'bal-neg' : 'bal-pos';
+    return `<tr class="${cls}${x.date === today ? ' bal-today' : ''}">
+      <td>${WD[i]} <small>${dm(x.date)}</small></td>
+      <td>${x.kcal > 0 ? fmtBR(Math.round(x.kcal)) : '—'}</td>
+      <td>${noProfile ? '—' : fmtBR(x.rotina)}</td>
+      <td>${x.treino > 0 ? '~' + fmtBR(x.treino) : '—'}</td>
+      <td>${noProfile ? '—' : '~' + fmtBR(x.gasto)}</td>
+      <td><b>${empty ? (future ? '' : 'sem refeição') : fmtSignedBR(x.saldo)}</b></td>
+    </tr>`;
+  }).join('');
+}
+
+document.getElementById('bal-prev').addEventListener('click', () => { balOffset--; loadBalanco(); });
+document.getElementById('bal-next').addEventListener('click', () => { if (balOffset < 0) { balOffset++; loadBalanco(); } });
+document.getElementById('btn-bal-dieta').addEventListener('click', () => document.querySelector('.nav-btn[data-tab="dieta"]').click());
+document.getElementById('btn-bal-treino').addEventListener('click', () => document.querySelector('.nav-btn[data-tab="ciclo"]').click());
 
 function renderEnergyBalance(rep, burn, isDia) {
   const fmtBR = n => Number(n).toLocaleString('pt-BR');
