@@ -12,6 +12,8 @@ services:
       - PORT=3000
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - FATSECRET_CONSUMER_KEY=${FATSECRET_CONSUMER_KEY:-}
+      - FATSECRET_CONSUMER_SECRET=${FATSECRET_CONSUMER_SECRET:-}
     volumes:
       - gym_data:/app/data
 

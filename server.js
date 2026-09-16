@@ -4,6 +4,7 @@ const path = require('path');
 const { db, ensureUserRows, normalizeFoodName, classifyExercise, EX_TIPOS } = require('./database');
 const { estimateExercise, restingKcalPerMin } = require('./calories');
 const { hashPassword, verifyPassword } = require('./auth');
+const fatsecret = require('./fatsecret');
 
 // Carrega o .env sem depender de pacote externo (variáveis já definidas têm prioridade)
 (function loadDotEnv() {
@@ -1355,7 +1356,7 @@ app.get('/api/meals', (req, res) => {
   const uid = req.session.userId;
   const date = String(req.query.date || new Date().toLocaleDateString('en-CA'));
   const entries = db.prepare(`
-    SELECT m.id, m.meal, m.grams, m.food_id,
+    SELECT m.id, m.meal, m.grams, m.food_id, m.source,
            COALESCE(f.name, m.label, 'Lançamento rápido') AS name,
            CASE WHEN f.id IS NULL THEN 1 ELSE 0 END AS quick,
            ROUND(COALESCE(f.kcal, m.kcal, 0) * m.grams / 100, 1) AS kcal,
@@ -1415,6 +1416,107 @@ app.delete('/api/meals/:id', (req, res) => {
   db.prepare('DELETE FROM meal_log WHERE id = ? AND user_id = ?').run(+req.params.id, req.session.userId);
   res.json({ success: true });
 });
+
+// ---- FatSecret: vínculo da conta e importação do diário ----
+const FATSECRET_ENABLED = !!(process.env.FATSECRET_CONSUMER_KEY && process.env.FATSECRET_CONSUMER_SECRET);
+
+function getFatsecretLink(uid) {
+  return db.prepare('SELECT * FROM fatsecret_link WHERE user_id = ?').get(uid) || null;
+}
+
+app.get('/api/fatsecret/status', (req, res) => {
+  const link = getFatsecretLink(req.session.userId);
+  res.json({
+    enabled: FATSECRET_ENABLED,
+    linked: !!link,
+    linked_at: link ? link.linked_at : null,
+    last_sync_date: link ? link.last_sync_date : null,
+    last_sync_at: link ? link.last_sync_at : null,
+    last_error: link ? link.last_error : null,
+    pending: !!(req.session.fatsecretPending),
+  });
+});
+
+// Passo 1: gera o token temporário e devolve o link para o usuário autorizar
+app.post('/api/fatsecret/link/start', async (req, res) => {
+  if (!FATSECRET_ENABLED) return res.status(503).json({ error: 'Integração FatSecret não configurada no servidor' });
+  try {
+    const r = await fatsecret.requestToken();
+    req.session.fatsecretPending = { token: r.token, secret: r.secret };
+    res.json({ authorizeUrl: r.authorizeUrl });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+// Passo 2: troca o PIN mostrado pela FatSecret pelo token permanente
+app.post('/api/fatsecret/link/finish', async (req, res) => {
+  const pending = req.session.fatsecretPending;
+  const pin = String(req.body.pin || '').trim();
+  if (!pending) return res.status(400).json({ error: 'Comece o vínculo de novo (token expirado)' });
+  if (!pin) return res.status(400).json({ error: 'Informe o código de verificação' });
+  try {
+    const t = await fatsecret.accessToken(pending.token, pending.secret, pin);
+    db.prepare(`
+      INSERT INTO fatsecret_link (user_id, token, secret) VALUES (?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET token = excluded.token, secret = excluded.secret,
+        linked_at = datetime('now'), last_error = NULL
+    `).run(req.session.userId, t.token, t.secret);
+    delete req.session.fatsecretPending;
+    res.json({ success: true });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+app.delete('/api/fatsecret/link', (req, res) => {
+  db.prepare('DELETE FROM fatsecret_link WHERE user_id = ?').run(req.session.userId);
+  delete req.session.fatsecretPending;
+  res.json({ success: true });
+});
+
+async function fatsecretSync(uid, date) {
+  const link = getFatsecretLink(uid);
+  if (!link) throw new Error('Conta FatSecret não vinculada');
+  try {
+    const r = await fatsecret.importMealsForDate(db, uid, link, date);
+    db.prepare("UPDATE fatsecret_link SET last_sync_date = ?, last_sync_at = datetime('now'), last_error = NULL WHERE user_id = ?")
+      .run(date, uid);
+    return r;
+  } catch (e) {
+    db.prepare("UPDATE fatsecret_link SET last_sync_at = datetime('now'), last_error = ? WHERE user_id = ?")
+      .run(String(e.message).slice(0, 200), uid);
+    throw e;
+  }
+}
+
+// Importa um dia (padrão: hoje). Substitui só o que veio da FatSecret; o que foi digitado fica.
+app.post('/api/fatsecret/sync', async (req, res) => {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body.date || '')) ? req.body.date : new Date().toLocaleDateString('en-CA');
+  try {
+    res.json(await fatsecretSync(req.session.userId, date));
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+// Sincronização automática: a cada hora puxa os últimos 3 dias de todo usuário vinculado.
+// Três porque a pessoa fecha o diário à noite e o relógio do container (UTC) já pode
+// estar no dia seguinte ao do Brasil; assim ontem e anteontem sempre entram.
+if (FATSECRET_ENABLED) {
+  const runAutoSync = async () => {
+    const links = db.prepare('SELECT user_id FROM fatsecret_link').all();
+    const days = [0, 1, 2].map(n => { const d = new Date(); d.setDate(d.getDate() - n); return d; });
+    for (const { user_id } of links) {
+      for (const d of days) {
+        try { await fatsecretSync(user_id, d.toLocaleDateString('en-CA')); }
+        catch (e) { console.error(`[fatsecret] sync user ${user_id}:`, e.message); }
+      }
+    }
+  };
+  setTimeout(runAutoSync, 15 * 1000);
+  setInterval(runAutoSync, 60 * 60 * 1000);
+}
 
 // Busca online de produtos industrializados (Open Food Facts, gratuito)
 app.get('/api/foods/online', async (req, res) => {

@@ -3918,6 +3918,7 @@ async function loadDietaData() {
   ]);
   dietDay = day;
   renderDieta();
+  loadFatsecretStatus();
 }
 
 function dietMondayStr(offsetWeeks) {
@@ -4395,7 +4396,7 @@ function renderDieta() {
       const row = document.createElement('div');
       row.className = 'diet-entry';
       row.innerHTML = `
-        <span class="de-name">${esc(e.name)}${e.quick ? ' <small class="de-tag">🔢</small>' : ''}</span>
+        <span class="de-name">${esc(e.name)}${e.source === 'fatsecret' ? ' <small class="de-tag" title="Importado da FatSecret">FS</small>' : e.quick ? ' <small class="de-tag">🔢</small>' : ''}</span>
         <span class="de-qty">${e.quick ? '—' : fmt1(e.grams) + ' g'}</span>
         <span class="de-kcal">${Math.round(e.kcal)} kcal · P ${fmt1(e.protein_g)}</span>
         <button class="de-del" title="Remover"><span data-icon="trash"></span></button>
@@ -4551,6 +4552,90 @@ document.getElementById('food-step-custom').addEventListener('submit', async e =
     fat_g: +document.getElementById('cf-fat').value || 0,
   });
   if (food && food.id) goToQtyStep(food);
+});
+
+// ---- FatSecret: vínculo da conta e sincronização do diário ----
+let fsStatus = null;
+
+async function loadFatsecretStatus() {
+  fsStatus = await api('GET', '/api/fatsecret/status');
+  renderFatsecret();
+}
+
+function fsSay(msg, isError) {
+  const el = document.getElementById('fs-msg');
+  el.textContent = msg || '';
+  el.classList.toggle('error', !!isError);
+}
+
+function renderFatsecret() {
+  const card = document.getElementById('fs-card');
+  if (!fsStatus || !fsStatus.enabled) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  const sub = document.getElementById('fs-sub');
+  const actions = document.getElementById('fs-actions');
+  document.getElementById('fs-pin-form').style.display = fsStatus.pending && !fsStatus.linked ? '' : 'none';
+  if (fsStatus.linked) {
+    const when = fsStatus.last_sync_at ? new Date(fsStatus.last_sync_at.replace(' ', 'T') + 'Z') : null;
+    sub.textContent = fsStatus.last_error
+      ? `Última tentativa falhou: ${fsStatus.last_error}`
+      : when ? `Sincroniza a cada hora. Última: ${when.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`
+             : 'Conta vinculada. A primeira sincronização roda em instantes.';
+    actions.innerHTML = `
+      <button type="button" class="btn-secondary btn-sm" data-fs="sync-today">Puxar hoje</button>
+      <button type="button" class="btn-secondary btn-sm" data-fs="sync-yesterday">Puxar ontem</button>
+      <button type="button" class="btn-secondary btn-sm fs-unlink" data-fs="unlink" title="Desvincular">✕</button>`;
+  } else {
+    sub.textContent = 'Importa o diário do app automaticamente.';
+    actions.innerHTML = `<button type="button" class="btn-primary btn-sm" data-fs="link">Conectar</button>`;
+  }
+}
+
+document.getElementById('fs-actions').addEventListener('click', async e => {
+  const btn = e.target.closest('[data-fs]');
+  if (!btn) return;
+  const action = btn.dataset.fs;
+  btn.disabled = true;
+  fsSay('');
+  try {
+    if (action === 'link') {
+      const win = window.open('', '_blank'); // abre antes do await para não cair no bloqueador de pop-up
+      const r = await api('POST', '/api/fatsecret/link/start');
+      if (r.error) { if (win) win.close(); return fsSay(r.error, true); }
+      if (win) win.location.href = r.authorizeUrl; else window.location.href = r.authorizeUrl;
+      fsStatus.pending = true;
+      renderFatsecret();
+      document.getElementById('fs-pin').focus();
+    } else if (action === 'unlink') {
+      if (!confirm('Desvincular a conta FatSecret? Os lançamentos já importados continuam.')) return;
+      await api('DELETE', '/api/fatsecret/link');
+      await loadFatsecretStatus();
+    } else {
+      const date = action === 'sync-today' ? todayStr() : dietDateOffsetStr(-1);
+      btn.textContent = 'Puxando…';
+      const r = await api('POST', '/api/fatsecret/sync', { date });
+      if (r.error) return fsSay(r.error, true);
+      const dm = `${date.slice(8)}/${date.slice(5, 7)}`;
+      fsSay(r.items ? `${r.items} itens em ${r.meals} refeições, ${r.kcal} kcal (${dm})` : `Nada registrado na FatSecret em ${dm}`);
+      await loadDietaData();
+      if (typeof loadHojeData === 'function') loadHojeData();
+    }
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('fs-pin-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const pin = document.getElementById('fs-pin').value.trim();
+  const r = await api('POST', '/api/fatsecret/link/finish', { pin });
+  if (r.error) return fsSay(r.error, true);
+  document.getElementById('fs-pin').value = '';
+  fsSay('Conta vinculada! Puxando o diário de hoje…');
+  await loadFatsecretStatus();
+  const s = await api('POST', '/api/fatsecret/sync', { date: todayStr() });
+  fsSay(s.error ? s.error : (s.items ? `${s.items} itens importados, ${s.kcal} kcal hoje` : 'Vinculado. Nada registrado hoje ainda.'), !!s.error);
+  await loadDietaData();
 });
 
 // ---- Lançamento rápido: só os números, sem escolher alimento ----

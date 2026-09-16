@@ -5037,3 +5037,24 @@ button, a, input, select, textarea, label, canvas,
   .set-row-cardio .set-pace { display: none; }
   .db-chip b { font-size: 0.72rem; }
 }
+
+/* ---- FatSecret ---- */
+.fs-card {
+  background: var(--card);
+  border: 1px solid var(--border, #2a2a2e);
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin: 0 0 14px;
+}
+.fs-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.fs-head b { font-size: 0.95rem; }
+.fs-sub { margin: 2px 0 0; font-size: 0.8rem; opacity: 0.7; }
+.fs-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.fs-unlink { padding-inline: 10px; }
+.fs-pin { margin-top: 10px; font-size: 0.85rem; }
+.fs-pin p { margin: 0 0 6px; opacity: 0.85; }
+.fs-pin-row { display: flex; gap: 6px; }
+.fs-pin-row input { flex: 1; min-width: 0; }
+.fs-msg { margin: 8px 0 0; font-size: 0.8rem; color: #30d158; }
+.fs-msg:empty { display: none; }
+.fs-msg.error { color: #ff6b6b; }

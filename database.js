@@ -336,6 +336,26 @@ db.exec(`
   db.exec('ALTER TABLE meal_log ADD COLUMN fat_g REAL');
 })();
 
+// Origem do lançamento: NULL = manual no app, 'fatsecret' = importado do diário da FatSecret.
+// A importação apaga e regrava só as linhas 'fatsecret' do dia, sem tocar no que foi digitado.
+(function migrateMealSource() {
+  if (tableColumns('meal_log').includes('source')) return;
+  db.exec('ALTER TABLE meal_log ADD COLUMN source TEXT');
+})();
+
+// Vínculo OAuth 1.0 com a conta FatSecret do usuário (token permanente, obtido uma vez)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS fatsecret_link (
+    user_id INTEGER PRIMARY KEY,
+    token TEXT NOT NULL,
+    secret TEXT NOT NULL,
+    linked_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_sync_date TEXT,
+    last_sync_at TEXT,
+    last_error TEXT
+  )
+`);
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS diet_config (
     user_id INTEGER PRIMARY KEY,
