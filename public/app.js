@@ -4582,8 +4582,7 @@ function renderFatsecret() {
       : when ? `Sincroniza a cada hora. Última: ${when.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`
              : 'Conta vinculada. A primeira sincronização roda em instantes.';
     actions.innerHTML = `
-      <button type="button" class="btn-secondary btn-sm" data-fs="sync-today">Puxar hoje</button>
-      <button type="button" class="btn-secondary btn-sm" data-fs="sync-yesterday">Puxar ontem</button>
+      <button type="button" class="btn-primary btn-sm" data-fs="sync">↻ Atualizar</button>
       <button type="button" class="btn-secondary btn-sm fs-unlink" data-fs="unlink" title="Desvincular">✕</button>`;
   } else {
     sub.textContent = 'Importa o diário do app automaticamente.';
@@ -4610,13 +4609,14 @@ document.getElementById('fs-actions').addEventListener('click', async e => {
       if (!confirm('Desvincular a conta FatSecret? Os lançamentos já importados continuam.')) return;
       await api('DELETE', '/api/fatsecret/link');
       await loadFatsecretStatus();
-    } else {
-      const date = action === 'sync-today' ? todayStr() : dietDateOffsetStr(-1);
-      btn.textContent = 'Puxando…';
-      const r = await api('POST', '/api/fatsecret/sync', { date });
+    } else if (action === 'sync') {
+      // Hoje + os 6 dias anteriores: pega o dia atual e completa o que faltar na semana
+      btn.textContent = 'Atualizando…';
+      const r = await api('POST', '/api/fatsecret/sync', { date: todayStr(), days: 7 });
       if (r.error) return fsSay(r.error, true);
-      const dm = `${date.slice(8)}/${date.slice(5, 7)}`;
-      fsSay(r.items ? `${r.items} itens em ${r.meals} refeições, ${r.kcal} kcal (${dm})` : `Nada registrado na FatSecret em ${dm}`);
+      const dm = d => `${d.slice(8)}/${d.slice(5, 7)}`;
+      const dias = r.results.filter(x => x.items > 0).map(x => `${dm(x.date)} ${x.kcal} kcal`).join(', ');
+      fsSay(r.synced ? `Atualizado: ${r.synced} dia(s) com registro na FatSecret — ${dias}` : 'Nada registrado na FatSecret nos últimos 7 dias');
       await loadDietaData();
       if (typeof loadHojeData === 'function') loadHojeData();
     }
@@ -4631,10 +4631,10 @@ document.getElementById('fs-pin-form').addEventListener('submit', async e => {
   const r = await api('POST', '/api/fatsecret/link/finish', { pin });
   if (r.error) return fsSay(r.error, true);
   document.getElementById('fs-pin').value = '';
-  fsSay('Conta vinculada! Puxando o diário de hoje…');
+  fsSay('Conta vinculada! Puxando a semana…');
   await loadFatsecretStatus();
-  const s = await api('POST', '/api/fatsecret/sync', { date: todayStr() });
-  fsSay(s.error ? s.error : (s.items ? `${s.items} itens importados, ${s.kcal} kcal hoje` : 'Vinculado. Nada registrado hoje ainda.'), !!s.error);
+  const s = await api('POST', '/api/fatsecret/sync', { date: todayStr(), days: 7 });
+  fsSay(s.error ? s.error : (s.synced ? `Vinculado: ${s.synced} dia(s) importados, ${s.kcal} kcal` : 'Vinculado. Nada registrado nos últimos 7 dias.'), !!s.error);
   await loadDietaData();
 });
 

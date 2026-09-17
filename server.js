@@ -1490,14 +1490,29 @@ async function fatsecretSync(uid, date) {
   }
 }
 
-// Importa um dia (padrão: hoje). Substitui só o que veio da FatSecret; o que foi digitado fica.
+// Importa `days` dias terminando em `date` (padrão: só hoje). A data vem do navegador para
+// não depender do fuso do container. Substitui só o que veio da FatSecret; o digitado fica.
 app.post('/api/fatsecret/sync', async (req, res) => {
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body.date || '')) ? req.body.date : new Date().toLocaleDateString('en-CA');
+  const end = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body.date || '')) ? req.body.date : new Date().toLocaleDateString('en-CA');
+  const days = Math.max(1, Math.min(14, parseInt(req.body.days, 10) || 1));
+  const results = [];
   try {
-    res.json(await fatsecretSync(req.session.userId, date));
+    for (let i = 0; i < days; i++) {
+      const d = new Date(end + 'T12:00:00');
+      d.setDate(d.getDate() - i);
+      results.push(await fatsecretSync(req.session.userId, d.toLocaleDateString('en-CA')));
+    }
   } catch (e) {
-    res.status(502).json({ error: e.message });
+    return res.status(502).json({ error: e.message, results });
   }
+  const withData = results.filter(r => r.items > 0);
+  res.json({
+    days,
+    synced: withData.length,
+    items: withData.reduce((s, r) => s + r.items, 0),
+    kcal: withData.reduce((s, r) => s + r.kcal, 0),
+    results,
+  });
 });
 
 // Sincronização automática: a cada hora puxa os últimos 3 dias de todo usuário vinculado.
