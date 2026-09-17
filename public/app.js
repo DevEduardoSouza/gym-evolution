@@ -704,7 +704,11 @@ async function openProfileModal() {
   document.getElementById('profile-calorias').value = p.calorias || '';
   document.getElementById('profile-rotina').value = p.rotina || '';
   document.getElementById('profile-peso-meta').value = p.peso_meta || '';
+  document.getElementById('profile-fatsecret').checked = !!p.fatsecret_enabled;
   modalProfile.classList.remove('hidden');
+  // A opção só existe se o servidor tiver as chaves da API FatSecret
+  const fs = await api('GET', '/api/fatsecret/status');
+  document.getElementById('profile-fatsecret-group').style.display = fs && fs.available ? '' : 'none';
 }
 
 document.getElementById('btn-profile-edit').addEventListener('click', openProfileModal);
@@ -725,8 +729,10 @@ profileForm.addEventListener('submit', async e => {
     calorias: document.getElementById('profile-calorias').value,
     rotina: document.getElementById('profile-rotina').value,
     peso_meta: document.getElementById('profile-peso-meta').value,
+    fatsecret_enabled: document.getElementById('profile-fatsecret').checked,
   });
   modalProfile.classList.add('hidden');
+  loadFatsecretStatus(); // mostra ou esconde o card da aba Dieta na hora
   renderBodyGoal();
   const perfilTab = document.getElementById('tab-perfil');
   if (perfilTab && perfilTab.classList.contains('active')) loadPerfilPage();

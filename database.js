@@ -77,6 +77,17 @@ if (!tableColumns('profile').includes('avatar')) {
   db.exec("ALTER TABLE profile ADD COLUMN avatar TEXT DEFAULT ''");
 }
 
+// Integração FatSecret é opcional por usuário: o card só aparece na aba Dieta de quem liga no perfil.
+// Quem já tinha a conta vinculada quando a opção nasceu começa com ela ligada.
+if (!tableColumns('profile').includes('fatsecret_enabled')) {
+  db.exec('ALTER TABLE profile ADD COLUMN fatsecret_enabled INTEGER NOT NULL DEFAULT 0');
+  const hasLinkTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'fatsecret_link'").get();
+  if (hasLinkTable) {
+    db.exec('INSERT OR IGNORE INTO profile (user_id) SELECT user_id FROM fatsecret_link');
+    db.exec('UPDATE profile SET fatsecret_enabled = 1 WHERE user_id IN (SELECT user_id FROM fatsecret_link)');
+  }
+}
+
 // Seguidores (rede social)
 db.exec(`
   CREATE TABLE IF NOT EXISTS follows (

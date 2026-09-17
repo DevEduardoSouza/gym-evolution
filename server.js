@@ -244,6 +244,11 @@ app.put('/api/profile', (req, res) => {
     pick('calorias', null), pick('rotina', ''), pick('peso_meta', null), pick('avatar', ''),
     req.session.userId
   );
+  // Fora do pick(): ele trata 0/false como "não veio", e aqui desligar é um valor válido
+  if (req.body.fatsecret_enabled !== undefined) {
+    db.prepare('UPDATE profile SET fatsecret_enabled = ? WHERE user_id = ?')
+      .run(req.body.fatsecret_enabled ? 1 : 0, req.session.userId);
+  }
   const updated = db.prepare('SELECT * FROM profile WHERE user_id = ?').get(req.session.userId);
   res.json(updated);
 });
@@ -1426,8 +1431,10 @@ function getFatsecretLink(uid) {
 
 app.get('/api/fatsecret/status', (req, res) => {
   const link = getFatsecretLink(req.session.userId);
+  const prof = db.prepare('SELECT fatsecret_enabled FROM profile WHERE user_id = ?').get(req.session.userId);
   res.json({
-    enabled: FATSECRET_ENABLED,
+    available: FATSECRET_ENABLED,                                   // servidor tem as chaves da API
+    enabled: FATSECRET_ENABLED && !!(prof && prof.fatsecret_enabled), // e o usuário ligou no perfil
     linked: !!link,
     linked_at: link ? link.linked_at : null,
     last_sync_date: link ? link.last_sync_date : null,
@@ -1522,7 +1529,11 @@ app.post('/api/fatsecret/sync', async (req, res) => {
 // estar no dia seguinte ao do Brasil; assim ontem e anteontem sempre entram.
 if (FATSECRET_ENABLED) {
   const runAutoSync = async () => {
-    const links = db.prepare('SELECT user_id FROM fatsecret_link').all();
+    // Só quem está com a integração ligada no perfil
+    const links = db.prepare(`
+      SELECT l.user_id FROM fatsecret_link l
+      JOIN profile p ON p.user_id = l.user_id AND p.fatsecret_enabled = 1
+    `).all();
     const days = [0, 1, 2].map(n => { const d = new Date(); d.setDate(d.getDate() - n); return d; });
     for (const { user_id } of links) {
       for (const d of days) {
