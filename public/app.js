@@ -4616,7 +4616,8 @@ document.getElementById('fs-actions').addEventListener('click', async e => {
       if (r.error) return fsSay(r.error, true);
       const dm = d => `${d.slice(8)}/${d.slice(5, 7)}`;
       const dias = r.results.filter(x => x.items > 0).map(x => `${dm(x.date)} ${x.kcal} kcal`).join(', ');
-      fsSay(r.synced ? `Atualizado: ${r.synced} dia(s) com registro na FatSecret — ${dias}` : 'Nada registrado na FatSecret nos últimos 7 dias');
+      const falhas = r.failed && r.failed.length ? ` (${r.failed.length} dia(s) não responderam, tente de novo)` : '';
+      fsSay((r.synced ? `Atualizado: ${r.synced} dia(s) com registro na FatSecret — ${dias}` : 'Nada registrado na FatSecret nos últimos 7 dias') + falhas, !!falhas && !r.synced);
       await loadDietaData();
       if (typeof loadHojeData === 'function') loadHojeData();
     }

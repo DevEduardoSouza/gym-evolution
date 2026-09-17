@@ -1495,19 +1495,21 @@ async function fatsecretSync(uid, date) {
 app.post('/api/fatsecret/sync', async (req, res) => {
   const end = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body.date || '')) ? req.body.date : new Date().toLocaleDateString('en-CA');
   const days = Math.max(1, Math.min(14, parseInt(req.body.days, 10) || 1));
+  // Um dia que falha não derruba os outros: só vira erro se nenhum dia passar
   const results = [];
-  try {
-    for (let i = 0; i < days; i++) {
-      const d = new Date(end + 'T12:00:00');
-      d.setDate(d.getDate() - i);
-      results.push(await fatsecretSync(req.session.userId, d.toLocaleDateString('en-CA')));
-    }
-  } catch (e) {
-    return res.status(502).json({ error: e.message, results });
+  const failed = [];
+  for (let i = 0; i < days; i++) {
+    const d = new Date(end + 'T12:00:00');
+    d.setDate(d.getDate() - i);
+    const date = d.toLocaleDateString('en-CA');
+    try { results.push(await fatsecretSync(req.session.userId, date)); }
+    catch (e) { failed.push({ date, error: e.message }); }
   }
+  if (!results.length) return res.status(502).json({ error: failed[0].error, failed });
   const withData = results.filter(r => r.items > 0);
   res.json({
     days,
+    failed,
     synced: withData.length,
     items: withData.reduce((s, r) => s + r.items, 0),
     kcal: withData.reduce((s, r) => s + r.kcal, 0),

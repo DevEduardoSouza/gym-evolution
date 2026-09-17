@@ -50,16 +50,41 @@ function oauthParams(token) {
   return p;
 }
 
+// Falha de rede ("fetch failed") acontece quando o Node reaproveita um socket keep-alive que a
+// FatSecret já fechou. Por isso: Connection: close, e até 3 tentativas. Cada tentativa assina de
+// novo, porque nonce e timestamp não podem se repetir.
 async function signedRequest(method, url, extra, tokenSecret = '', token = null) {
-  const params = { ...oauthParams(token), ...extra };
-  params.oauth_signature = sign(method, url, params, creds().secret, tokenSecret);
-  const body = Object.keys(params).map(k => `${enc(k)}=${enc(params[k])}`).join('&');
-  const res = method === 'GET'
-    ? await fetch(`${url}?${body}`)
-    : await fetch(url, { method, headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`FatSecret ${res.status}: ${text.slice(0, 300)}`);
-  return text;
+  let lastErr;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const params = { ...oauthParams(token), ...extra };
+    params.oauth_signature = sign(method, url, params, creds().secret, tokenSecret);
+    const body = Object.keys(params).map(k => `${enc(k)}=${enc(params[k])}`).join('&');
+    let res;
+    try {
+      res = method === 'GET'
+        ? await fetch(`${url}?${body}`, { headers: { Connection: 'close' }, signal: AbortSignal.timeout(15000) })
+        : await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', Connection: 'close' },
+            body,
+            signal: AbortSignal.timeout(15000),
+          });
+    } catch (e) {
+      const code = e.cause && (e.cause.code || e.cause.message);
+      lastErr = new Error(`Sem conexão com a FatSecret (${code || e.message})`);
+      await new Promise(r => setTimeout(r, 500 * attempt));
+      continue;
+    }
+    const text = await res.text();
+    if (res.status >= 500 && attempt < 3) {
+      lastErr = new Error(`FatSecret ${res.status}: ${text.slice(0, 300)}`);
+      await new Promise(r => setTimeout(r, 500 * attempt));
+      continue;
+    }
+    if (!res.ok) throw new Error(`FatSecret ${res.status}: ${text.slice(0, 300)}`);
+    return text;
+  }
+  throw lastErr;
 }
 
 function parseForm(text) {
