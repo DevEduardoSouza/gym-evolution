@@ -2,7 +2,7 @@ const express = require('express');
 const session = require('express-session');
 const path = require('path');
 const { db, ensureUserRows, normalizeFoodName, classifyExercise, EX_TIPOS } = require('./database');
-const { estimateExercise, restingKcalPerMin } = require('./calories');
+const { estimateExercise, restingKcalPerMin, MAX_GRADE_PCT } = require('./calories');
 const { hashPassword, verifyPassword } = require('./auth');
 const fatsecret = require('./fatsecret');
 
@@ -476,7 +476,8 @@ app.get('/api/progressao/summary', (req, res) => {
   `).all(uid, uid);
   // Cardio: última sessão com tempo e distância somados
   const cardio = db.prepare(`
-    SELECT cl.exercise, cl.date, SUM(cl.minutes) AS minutes, SUM(cl.distance_km) AS km, COUNT(*) AS blocks
+    SELECT cl.exercise, cl.date, SUM(cl.minutes) AS minutes, SUM(cl.distance_km) AS km,
+           SUM(cl.minutes * cl.incline_pct) / NULLIF(SUM(cl.minutes), 0) AS incline, COUNT(*) AS blocks
     FROM cardio_log cl
     JOIN (SELECT exercise, MAX(date) AS md FROM cardio_log WHERE user_id = ? GROUP BY exercise) last
       ON last.exercise = cl.exercise AND last.md = cl.date
@@ -580,15 +581,19 @@ app.post('/api/cardio/session', (req, res) => {
   if (!exercise) return res.status(400).json({ error: 'Exercício é obrigatório' });
 
   const clean = blocks
-    .map(b => ({ minutes: parseFloat(b.minutes), distance_km: parseFloat(b.distance_km) || 0 }))
+    .map(b => ({
+      minutes: parseFloat(b.minutes),
+      distance_km: parseFloat(b.distance_km) || 0,
+      incline_pct: Math.min(Math.max(parseFloat(b.incline_pct) || 0, 0), MAX_GRADE_PCT),
+    }))
     .filter(b => b.minutes > 0 && b.minutes <= 600 && b.distance_km >= 0 && b.distance_km <= 200);
   if (!clean.length) return res.status(400).json({ error: 'Informe o tempo de pelo menos um bloco' });
 
   const uid = req.session.userId;
   const tx = db.transaction(() => {
     db.prepare('DELETE FROM cardio_log WHERE user_id = ? AND exercise = ? AND date = ?').run(uid, exercise, date);
-    const ins = db.prepare('INSERT INTO cardio_log (user_id, date, exercise, minutes, distance_km, block) VALUES (?, ?, ?, ?, ?, ?)');
-    clean.forEach((b, i) => ins.run(uid, date, exercise, b.minutes, b.distance_km, i + 1));
+    const ins = db.prepare('INSERT INTO cardio_log (user_id, date, exercise, minutes, distance_km, incline_pct, block) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    clean.forEach((b, i) => ins.run(uid, date, exercise, b.minutes, b.distance_km, b.incline_pct, i + 1));
   });
   tx();
   const minutes = clean.reduce((a, b) => a + b.minutes, 0);
@@ -906,12 +911,12 @@ function computeCalories(uid, date) {
   setRows.forEach(r => { (setsByEx[r.exercise] = setsByEx[r.exercise] || []).push({ weight: r.weight, reps: r.reps }); });
 
   const cardioRows = db.prepare(`
-    SELECT exercise, minutes, distance_km FROM cardio_log
+    SELECT exercise, minutes, distance_km, incline_pct FROM cardio_log
     WHERE user_id = ? AND date = ? AND minutes > 0
     ORDER BY exercise, block, id
   `).all(uid, date);
   const cardioByEx = {};
-  cardioRows.forEach(r => { (cardioByEx[r.exercise] = cardioByEx[r.exercise] || []).push({ minutes: r.minutes, distance_km: r.distance_km }); });
+  cardioRows.forEach(r => { (cardioByEx[r.exercise] = cardioByEx[r.exercise] || []).push({ minutes: r.minutes, distance_km: r.distance_km, incline_pct: r.incline_pct }); });
 
   const prStmt = db.prepare('SELECT COALESCE(MAX(weight), 0) w FROM progressao_carga WHERE user_id = ? AND exercise = ? AND date <= ?');
   const libStmt = db.prepare('SELECT muscle, tipo FROM exercise_library WHERE name = ? AND (user_id IS NULL OR user_id = ?) ORDER BY user_id DESC LIMIT 1');

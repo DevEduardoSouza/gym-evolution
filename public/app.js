@@ -1748,6 +1748,12 @@ function fmtKm(km) {
 function fmtMin(min) {
   return String(Math.round(+min * 10) / 10).replace('.', ',');
 }
+const MAX_INCLINE_PCT = 30; // mesmo teto do servidor (calories.js)
+
+// Inclinação: "5" e não "5,0"; "7,5" quando tem meio grau
+function fmtIncline(pct) {
+  return String(Math.round(+pct * 10) / 10).replace('.', ',');
+}
 // Ritmo min/km → "10:34"
 function fmtPace(minutes, km) {
   if (!(minutes > 0) || !(km > 0)) return '';
@@ -1884,7 +1890,7 @@ function renderDay() {
     let lastTxt;
     if (isCardio(p)) {
       lastTxt = sum && sum.cardio
-        ? `${fmtMin(sum.minutes)} min${sum.km > 0 ? ' · ' + fmtKm(sum.km) + ' km' : ''} <small>${formatShortDate(sum.date)}</small>`
+        ? `${fmtMin(sum.minutes)} min${sum.km > 0 ? ' · ' + fmtKm(sum.km) + ' km' : ''}${sum.incline > 0 ? ' · ' + fmtIncline(sum.incline) + '%' : ''} <small>${formatShortDate(sum.date)}</small>`
         : '<small>registrar tempo</small>';
     } else {
       lastTxt = sum && !sum.cardio
@@ -2035,7 +2041,10 @@ function buildEvoSeries() {
     for (const d of dates) {
       const minutes = byDate[d].reduce((a, r) => a + (+r.minutes || 0), 0);
       const km = byDate[d].reduce((a, r) => a + (+r.distance_km || 0), 0);
-      out.push({ date: d, weight: evoCardioAxis === 'km' ? +km.toFixed(2) : Math.round(minutes), minutes, km, reps: 0 });
+      // Inclinação do dia: média ponderada pelo tempo de cada bloco
+      const incMin = byDate[d].reduce((a, r) => a + (+r.incline_pct || 0) * (+r.minutes || 0), 0);
+      const incline = minutes > 0 ? incMin / minutes : 0;
+      out.push({ date: d, weight: evoCardioAxis === 'km' ? +km.toFixed(2) : Math.round(minutes), minutes, km, incline, reps: 0 });
     }
     return out;
   }
@@ -2202,8 +2211,8 @@ function renumberSessionRows() {
   });
 }
 
-// Cardio: cada linha é um bloco (tempo em minutos + distância em km)
-function addCardioRow(b = { minutes: '', distance_km: '' }) {
+// Cardio: cada linha é um bloco (tempo em minutos + distância em km + inclinação em %)
+function addCardioRow(b = { minutes: '', distance_km: '', incline_pct: '' }) {
   const el = document.getElementById('evoc-sets');
   const row = document.createElement('div');
   row.className = 'set-row set-row-cardio';
@@ -2212,18 +2221,25 @@ function addCardioRow(b = { minutes: '', distance_km: '' }) {
     <input type="number" class="set-min" step="1" min="0" inputmode="decimal" placeholder="0" value="${b.minutes !== '' && b.minutes != null ? b.minutes : ''}">
     <span class="set-x">min ·</span>
     <input type="number" class="set-km" step="0.01" min="0" inputmode="decimal" placeholder="0,0" value="${b.distance_km > 0 ? b.distance_km : ''}">
-    <span class="set-x">km</span>
+    <span class="set-x">km ·</span>
+    <input type="number" class="set-inc" step="0.5" min="0" max="${MAX_INCLINE_PCT}" inputmode="decimal" placeholder="0" title="Inclinação da esteira" value="${b.incline_pct > 0 ? b.incline_pct : ''}">
+    <span class="set-x">%</span>
     <span class="set-pace"></span>
     <button type="button" class="set-del" title="Remover bloco">&#10005;</button>
   `;
   const upd = () => {
     const m = parseFloat(row.querySelector('.set-min').value);
     const k = parseFloat(row.querySelector('.set-km').value);
+    const inc = parseFloat(row.querySelector('.set-inc').value);
     const pace = fmtPace(m, k);
-    row.querySelector('.set-pace').textContent = pace ? `${pace} /km · ${(k / (m / 60)).toFixed(1).replace('.', ',')} km/h` : '';
+    const parts = [];
+    if (pace) parts.push(`${pace} /km · ${(k / (m / 60)).toFixed(1).replace('.', ',')} km/h`);
+    if (inc > 0) parts.push(`↑ ${fmtIncline(inc)}%`);
+    row.querySelector('.set-pace').textContent = parts.join(' · ');
   };
   row.querySelector('.set-min').addEventListener('input', upd);
   row.querySelector('.set-km').addEventListener('input', upd);
+  row.querySelector('.set-inc').addEventListener('input', upd);
   upd();
   row.querySelector('.set-del').addEventListener('click', () => {
     row.remove();
@@ -2234,13 +2250,13 @@ function addCardioRow(b = { minutes: '', distance_km: '' }) {
 
 function cardioPrefill() {
   const today = evoRawRows.filter(r => r.date === todayStr());
-  if (today.length) return today.map(r => ({ minutes: r.minutes, distance_km: r.distance_km }));
-  // Sem registro hoje: começa com o último dia como sugestão de tempo, sem distância
+  if (today.length) return today.map(r => ({ minutes: r.minutes, distance_km: r.distance_km, incline_pct: r.incline_pct }));
+  // Sem registro hoje: começa com o último dia como sugestão de tempo e inclinação, sem distância
   const dates = [...new Set(evoRawRows.map(r => r.date))].sort();
   const last = dates.length ? evoRawRows.filter(r => r.date === dates[dates.length - 1]) : [];
-  if (last.length) return last.map(r => ({ minutes: r.minutes, distance_km: '' }));
+  if (last.length) return last.map(r => ({ minutes: r.minutes, distance_km: '', incline_pct: r.incline_pct }));
   const sch = String(evoItem && evoItem.scheme || '').match(/(\d+)\s*min/i);
-  return [{ minutes: sch ? +sch[1] : '', distance_km: '' }];
+  return [{ minutes: sch ? +sch[1] : '', distance_km: '', incline_pct: '' }];
 }
 
 function renderSessionRows() {
@@ -2261,6 +2277,7 @@ async function saveCardioSession() {
   const blocks = [...document.querySelectorAll('#evoc-sets .set-row-cardio')].map(r => ({
     minutes: r.querySelector('.set-min').value,
     distance_km: r.querySelector('.set-km').value,
+    incline_pct: r.querySelector('.set-inc').value,
   })).filter(b => b.minutes !== '' && parseFloat(b.minutes) > 0);
   if (!blocks.length) {
     toastMsg('Informe o tempo de pelo menos um bloco');
@@ -2318,7 +2335,7 @@ async function openEvoModal(p) {
     : `/api/progressao?exercise=${encodeURIComponent(p.name)}`);
 
   document.getElementById('evoc-sub').textContent = cardio
-    ? 'Tempo e distância por sessão — o ritmo define as calorias'
+    ? 'Tempo, distância e inclinação por sessão — ritmo e subida definem as calorias'
     : 'Evolução da carga máxima ao longo do tempo';
   document.getElementById('evoc-atual-lbl').textContent = cardio ? 'Último (min)' : 'Atual (kg)';
   document.getElementById('evoc-max-lbl').textContent = cardio ? 'Maior (km)' : 'Máxima (kg)';
@@ -2537,6 +2554,7 @@ evocCanvas.addEventListener('pointermove', e => {
       const pace = fmtPace(p.minutes, p.km);
       extra = evoCardioAxis === 'km' ? ` · ${Math.round(p.minutes)} min` : (p.km > 0 ? ` · ${fmtKm(p.km)} km` : '');
       if (pace) extra += ` · ${pace} /km`;
+      if (p.incline > 0) extra += ` · ${fmtIncline(p.incline)}%`;
     }
     evocTooltip.innerHTML = `<strong>${fmtW(p.weight)} ${unit}${extra}</strong>${deltaHtml}${record}<span class="tt-date">${formatShortDate(p.date)}</span>`;
     evocTooltip.style.display = 'block';

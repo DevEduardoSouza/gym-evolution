@@ -193,8 +193,8 @@ if (!tableColumns('progressao_carga').includes('set_number')) {
   db.exec('ALTER TABLE progressao_carga ADD COLUMN set_number INTEGER NOT NULL DEFAULT 0');
 }
 
-// Sessões de cardio (tempo + distância). Uma linha por bloco: quem faz esteira de
-// manhã e caminhada à noite registra dois blocos no mesmo exercício/dia.
+// Sessões de cardio (tempo + distância + inclinação). Uma linha por bloco: quem faz
+// esteira de manhã e caminhada à noite registra dois blocos no mesmo exercício/dia.
 db.exec(`
   CREATE TABLE IF NOT EXISTS cardio_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -203,10 +203,17 @@ db.exec(`
     exercise TEXT NOT NULL,
     minutes REAL NOT NULL DEFAULT 0,
     distance_km REAL NOT NULL DEFAULT 0,
+    incline_pct REAL NOT NULL DEFAULT 0,
     block INTEGER NOT NULL DEFAULT 1
   )
 `);
 db.exec('CREATE INDEX IF NOT EXISTS idx_cardio_log_user_date ON cardio_log (user_id, date)');
+
+// Migração: inclinação da esteira (%). Bloco antigo fica em 0 = piso plano, que é
+// como ele já era contado na estimativa de calorias.
+if (!tableColumns('cardio_log').includes('incline_pct')) {
+  db.exec('ALTER TABLE cardio_log ADD COLUMN incline_pct REAL NOT NULL DEFAULT 0');
+}
 
 // ======== CICLO DE TREINO SEMANAL ========
 

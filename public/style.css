@@ -5026,6 +5026,10 @@ button, a, input, select, textarea, label, canvas,
 .db-chip.pos b { color: #ff453a; }
 .db-chip.empty b { color: #48484c; }
 /* Blocos de cardio no modal de evolução */
+.set-row-cardio { gap: 6px; }
+/* Três campos na linha (min · km · %) — mais estreitos que os de carga */
+.set-row-cardio input { width: 56px; }
+.set-row-cardio .set-inc { width: 48px; }
 .set-row-cardio .set-pace {
   font-size: 0.68rem;
   color: var(--faint);

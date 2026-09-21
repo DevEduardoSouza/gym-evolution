@@ -14,6 +14,8 @@
 // - Cardio: com tempo + distância registrados, caminhada/corrida usa o MET pela
 //   velocidade (tabela do Compendium, interpolada). Sem distância, MET fixo por
 //   modalidade (bike, elíptico, corda...). Sem nada, 20 min no MET da modalidade.
+// - Inclinação: subir custa mais que andar no plano. O MET plano é multiplicado pelo
+//   fator das equações metabólicas do ACSM (ver gradeFactor). Só vale pra cardio a pé.
 //
 // É uma ESTIMATIVA (margem de ±25%). Serve pra comparar dias e cruzar com a dieta,
 // não pra contabilidade exata.
@@ -73,12 +75,50 @@ function metForSpeed(kmh) {
   return SPEED_MET[SPEED_MET.length - 1][1];
 }
 
-// MET de um bloco de cardio: velocidade quando é a pé e tem distância, senão modalidade
-function cardioMet(name, minutes, distanceKm) {
-  if (isFootCardio(name) && minutes > 0 && distanceKm > 0) {
-    return metForSpeed(distanceKm / (minutes / 60));
+// Inverso de metForSpeed: a velocidade que aquele MET representa no plano. Usado
+// quando a modalidade dá o MET mas não há distância pra calcular a velocidade.
+function speedForMet(met) {
+  if (!(met > 0)) return 0;
+  if (met <= SPEED_MET[0][1]) return SPEED_MET[0][0];
+  for (let i = 1; i < SPEED_MET.length; i++) {
+    const [s0, m0] = SPEED_MET[i - 1];
+    const [s1, m1] = SPEED_MET[i];
+    if (met <= m1) return s0 + ((met - m0) / (m1 - m0)) * (s1 - s0);
   }
-  return modalityMet(name);
+  return SPEED_MET[SPEED_MET.length - 1][0];
+}
+
+const MAX_GRADE_PCT = 30; // acima disso vira escalada; a equação do ACSM não vale mais
+
+// Quanto a inclinação encarece o esforço, pelas equações metabólicas do ACSM:
+//   caminhada: VO2 = 0,1 × S + 1,8 × S × G + 3,5
+//   corrida:   VO2 = 0,2 × S + 0,9 × S × G + 3,5
+// (S = velocidade em m/min, G = inclinação em fração). O retorno é a razão
+// VO2(G) / VO2(0) na mesma velocidade, que multiplica o MET plano — assim, em 0%
+// o fator é 1 e a estimativa continua idêntica à de antes. Entre 6,4 e 8 km/h,
+// onde o ACSM troca de equação, os coeficientes são interpolados.
+function gradeFactor(kmh, inclinePct) {
+  const g = Math.min(Math.max(inclinePct || 0, 0), MAX_GRADE_PCT) / 100;
+  if (!(g > 0) || !(kmh > 0)) return 1;
+  const s = (kmh * 1000) / 60;
+  const t = kmh <= 6.4 ? 0 : kmh >= 8 ? 1 : (kmh - 6.4) / 1.6;
+  const horiz = 0.1 + t * (0.2 - 0.1);
+  const vert = 1.8 + t * (0.9 - 1.8);
+  const flat = horiz * s + 3.5;
+  return (flat + vert * s * g) / flat;
+}
+
+// MET de um bloco de cardio: velocidade quando é a pé e tem distância, senão
+// modalidade. A inclinação só entra no cardio a pé (esteira, caminhada, corrida).
+function cardioMet(name, minutes, distanceKm, inclinePct) {
+  if (!isFootCardio(name)) return modalityMet(name);
+  if (minutes > 0 && distanceKm > 0) {
+    const kmh = distanceKm / (minutes / 60);
+    return metForSpeed(kmh) * gradeFactor(kmh, inclinePct);
+  }
+  // Sem distância: parte do MET da modalidade e da velocidade que ele representa
+  const met = modalityMet(name);
+  return met * gradeFactor(speedForMet(met), inclinePct);
 }
 
 function paramsFor(tipo) {
@@ -139,18 +179,19 @@ function estimateExercise(ex, person) {
     // Blocos registrados (tempo + distância) > minutos avulsos > esquema do plano ("30 min")
     let blocks = Array.isArray(ex.cardio) ? ex.cardio.filter(b => b && b.minutes > 0) : [];
     let source = 'series';
-    if (!blocks.length && ex.minutes > 0) blocks = [{ minutes: ex.minutes, distance_km: ex.distance_km || 0 }];
+    if (!blocks.length && ex.minutes > 0) blocks = [{ minutes: ex.minutes, distance_km: ex.distance_km || 0, incline_pct: ex.incline_pct || 0 }];
     if (!blocks.length) {
       const sch = parseScheme(ex.scheme);
-      blocks = [{ minutes: sch.minutes || DEFAULT_CARDIO_MIN, distance_km: 0 }];
+      blocks = [{ minutes: sch.minutes || DEFAULT_CARDIO_MIN, distance_km: 0, incline_pct: 0 }];
       source = 'plano';
     }
-    let kcal = 0, minutes = 0, distance = 0;
+    let kcal = 0, minutes = 0, distance = 0, inclineMin = 0;
     blocks.forEach(b => {
-      const met = cardioMet(ex.name, b.minutes, b.distance_km);
+      const met = cardioMet(ex.name, b.minutes, b.distance_km, b.incline_pct);
       kcal += met * restKcal * b.minutes;
       minutes += b.minutes;
       distance += b.distance_km > 0 ? b.distance_km : 0;
+      inclineMin += (b.incline_pct > 0 ? b.incline_pct : 0) * b.minutes;
     });
     const met = minutes > 0 ? kcal / (restKcal * minutes) : P.met;
     return {
@@ -159,6 +200,8 @@ function estimateExercise(ex, person) {
       met: Math.round(met * 10) / 10,
       sets: 0, reps: 0, topWeight: 0,
       distance: Math.round(distance * 100) / 100,
+      // Inclinação média do dia, ponderada pelo tempo de cada bloco
+      incline: minutes > 0 ? Math.round((inclineMin / minutes) * 10) / 10 : 0,
       blocks: blocks.length,
       source,
     };
@@ -200,4 +243,4 @@ function estimateExercise(ex, person) {
   };
 }
 
-module.exports = { estimateExercise, restingKcalPerMin, parseScheme, cardioMet, metForSpeed, TIPO_PARAMS, DEFAULT_PESO };
+module.exports = { estimateExercise, restingKcalPerMin, parseScheme, cardioMet, metForSpeed, gradeFactor, MAX_GRADE_PCT, TIPO_PARAMS, DEFAULT_PESO };
