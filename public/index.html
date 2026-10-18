@@ -29,6 +29,10 @@
         <button class="nav-btn active" data-tab="hoje">
           <span class="nav-icon" data-icon="home"></span><span class="nav-label">Hoje</span>
         </button>
+        <button class="nav-btn nav-desafio" data-tab="desafios">
+          <span class="nav-icon" data-icon="flag"></span><span class="nav-label">Desafios</span>
+          <span class="nav-ch-chip" id="nav-ch-chip" hidden></span>
+        </button>
         <button class="nav-btn" data-tab="ciclo">
           <span class="nav-icon" data-icon="dumbbell"></span><span class="nav-label">Treino</span>
         </button>
@@ -88,6 +92,7 @@
 
     <div id="tab-hoje" class="tab-panel active">
       <p class="hoje-greeting" id="hoje-greeting"></p>
+      <button type="button" id="hoje-challenge" class="ch-banner" hidden></button>
       <div class="hoje-grid">
         <div class="hoje-card hoje-treino-card">
           <div class="hoje-card-head">
@@ -551,6 +556,18 @@
           <input id="ai-input" type="text" maxlength="2000" placeholder="Pergunte sobre seus treinos, dieta, evolução..." />
           <button type="submit" id="ai-send" class="btn-primary ai-send-btn" title="Enviar"><span data-icon="send"></span></button>
         </form>
+      </div>
+    </div>
+
+    <div id="tab-desafios" class="tab-panel">
+      <div id="ch-active" hidden></div>
+      <div id="ch-catalog" hidden>
+        <p class="ch-intro">Escolha um desafio e o app inteiro entra no modo foco. Déficit, água e treino são conferidos sozinhos com o que você já registra; o resto é check-in rápido do dia.</p>
+        <div class="ch-templates" id="ch-templates"></div>
+        <div class="hoje-card ch-history-card" id="ch-history-card" hidden>
+          <div class="hoje-card-head"><h3>Desafios anteriores</h3></div>
+          <div id="ch-history" class="ch-history"></div>
+        </div>
       </div>
     </div>
 
@@ -1117,6 +1134,45 @@
           <button type="submit" class="btn-primary">Salvar</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <div id="modal-ch-start" class="modal-overlay hidden">
+    <div class="modal ch-modal">
+      <div class="ch-modal-cover" id="chs-cover"></div>
+      <form id="ch-start-form">
+        <ul class="ch-rule-list" id="chs-rules"></ul>
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="chs-date">Começa em</label>
+            <input type="date" id="chs-date" required>
+            <div class="ch-date-chips">
+              <button type="button" class="ch-chip-btn" data-start="today">Hoje</button>
+              <button type="button" class="ch-chip-btn" data-start="monday">Próxima segunda</button>
+            </div>
+          </div>
+          <div class="form-group" id="chs-peso-group">
+            <label for="chs-peso">Seu peso hoje (kg)</label>
+            <input type="number" id="chs-peso" step="0.1" min="30" max="400" placeholder="Ex: 90">
+          </div>
+        </div>
+        <p id="chs-preview" class="profile-hint"></p>
+        <div class="form-actions">
+          <button type="button" id="btn-chs-cancel" class="btn-secondary">Cancelar</button>
+          <button type="submit" class="btn-primary" id="btn-chs-go">Começar desafio</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="modal-ch-day" class="modal-overlay hidden">
+    <div class="modal ch-modal">
+      <h2 id="chd-title">Dia</h2>
+      <p class="profile-hint" id="chd-sub"></p>
+      <div id="chd-rules" class="ch-rules"></div>
+      <div class="form-actions">
+        <button type="button" id="btn-chd-close" class="btn-primary">Fechar</button>
+      </div>
     </div>
   </div>
 

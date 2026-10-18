@@ -428,6 +428,39 @@ db.exec(`
   console.log(`Biblioteca de alimentos: +${missing.length} itens do seed`);
 })();
 
+// ======== DESAFIOS ========
+
+// Um desafio iniciado pelo usuário. As regras do modelo são copiadas em JSON no início,
+// então mudar o catálogo no código não altera um desafio que já está rodando.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS challenges (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    template TEXT NOT NULL,
+    name TEXT NOT NULL,
+    theme TEXT NOT NULL DEFAULT '',
+    start_date TEXT NOT NULL,
+    days INTEGER NOT NULL,
+    rules TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    ended_at TEXT
+  )
+`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_challenges_user ON challenges (user_id, status)');
+
+// Check-in diário do que o app não mede sozinho: açúcar (1 = cumpriu, 0 = comeu, NULL = não marcou)
+// e a refeição livre da semana (dia marcado fica isento de açúcar e déficit).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS challenge_checkins (
+    challenge_id INTEGER NOT NULL,
+    date TEXT NOT NULL,
+    no_sugar INTEGER,
+    free_meal INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (challenge_id, date)
+  )
+`);
+
 // ======== MIGRAÇÕES (banco antigo, dado único -> por usuário) ========
 
 // measurements e progressao_carga: basta adicionar a coluna e atribuir ao dono

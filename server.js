@@ -1692,6 +1692,323 @@ app.get('/api/diet-report', (req, res) => {
   });
 });
 
+// ======== DESAFIOS ========
+
+// Catálogo fixo. Ao começar, as regras são copiadas para o desafio do usuário.
+//   deficit.weeks        déficit diário alvo (kcal) de cada semana; depois da última, repete a última
+//   no_sugar             check-in diário "sem açúcar"
+//   free_meals_per_week  refeições livres por semana do desafio (o dia fica isento de açúcar e déficit)
+//   water_ml_per_kg      meta de água pelo peso (50 ml/kg = 1 L a cada 20 kg), fixada no início
+//   train_per_week       dias de treino por semana
+const CHALLENGE_TEMPLATES = [
+  {
+    id: 'seca60', name: 'Desafio 60 dias', emoji: '🔥', theme: 'fire', days: 60,
+    tagline: 'Déficit em ondas, zero açúcar e hidratação no talo.',
+    rules: { deficit: { weeks: [1000, 750, 500, 500, 500, 750, 1000, 1000] }, no_sugar: true, free_meals_per_week: 1, water_ml_per_kg: 50 },
+  },
+  {
+    id: 'deficit30', name: '30 dias no déficit', emoji: '⚡', theme: 'bolt', days: 30,
+    tagline: 'Déficit constante de 500 kcal por dia, sem sofrimento.',
+    rules: { deficit: { weeks: [500] }, free_meals_per_week: 1, water_ml_per_kg: 35 },
+  },
+  {
+    id: 'acucar21', name: '21 dias sem açúcar', emoji: '🍃', theme: 'leaf', days: 21,
+    tagline: 'Três semanas para resetar o paladar.',
+    rules: { no_sugar: true },
+  },
+  {
+    id: 'agua30', name: '30 dias hidratado', emoji: '💧', theme: 'water', days: 30,
+    tagline: '1 litro a cada 20 kg, todo santo dia.',
+    rules: { water_ml_per_kg: 50 },
+  },
+  {
+    id: 'treino30', name: '30 dias de ferro', emoji: '🏋️', theme: 'iron', days: 30,
+    tagline: '5 treinos por semana e água em dia.',
+    rules: { train_per_week: 5, water_ml_per_kg: 35 },
+  },
+];
+
+// Mesma conta da aba Balanço (app.js): gasto do dia = repouso × 1,2 + treino estimado
+const CHALLENGE_ACTIVITY_FACTOR = 1.2;
+
+const isDateStr = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+
+function addDaysStr(dateStr, n) {
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() + n);
+  return d.toLocaleDateString('en-CA');
+}
+
+function deficitTargetFor(rules, week) {
+  const w = rules.deficit.weeks;
+  return w[Math.min(week, w.length) - 1];
+}
+
+function waterTargetMl(pesoKg, mlPerKg) {
+  return Math.round((pesoKg * mlPerKg) / 50) * 50;
+}
+
+// Monta o quadro completo do desafio: status de cada regra em cada dia, resumo por semana e
+// sequência. `today` vem do navegador para não depender do fuso do servidor.
+//   status de regra: ok | fail | pending (hoje, ainda dá) | missing (passou sem registro)
+//                    | free (refeição livre) | rest (dia sem treino) | future
+//   status do dia:   done | fail | today | future
+function evaluateChallenge(uid, ch, today) {
+  const rules = JSON.parse(ch.rules);
+  const tpl = CHALLENGE_TEMPLATES.find(t => t.id === ch.template) || {};
+  const end = addDaysStr(ch.start_date, ch.days - 1);
+  const dates = dateRange(ch.start_date, end);
+  const until = today < end ? today : end;
+  const hasData = until >= ch.start_date;
+  const warn = [];
+
+  const checkins = {};
+  db.prepare('SELECT date, no_sugar, free_meal FROM challenge_checkins WHERE challenge_id = ?')
+    .all(ch.id).forEach(r => { checkins[r.date] = r; });
+
+  const kcalByDate = {};
+  if (rules.deficit && hasData) {
+    db.prepare(`
+      SELECT m.date, SUM(COALESCE(f.kcal, m.kcal, 0) * m.grams / 100) AS kcal
+      FROM meal_log m LEFT JOIN food_library f ON f.id = m.food_id
+      WHERE m.user_id = ? AND m.date >= ? AND m.date <= ?
+      GROUP BY m.date
+    `).all(uid, ch.start_date, until).forEach(r => { kcalByDate[r.date] = Math.round(r.kcal); });
+  }
+
+  const treinoKcal = {};
+  let rotina = 0;
+  if ((rules.deficit || rules.train_per_week) && hasData) {
+    const burn = caloriesRange(uid, ch.start_date, until);
+    burn.days.forEach(d => { treinoKcal[d.date] = d.kcal; });
+    rotina = Math.round(burn.basal * CHALLENGE_ACTIVITY_FACTOR);
+  }
+  if (rules.deficit) {
+    const person = personFor(uid);
+    if (!person.peso || !person.idade || !person.altura || !/^[mf]/i.test(person.sexo)) {
+      warn.push('Preencha peso (em Corpo), sexo, idade e altura no perfil para o déficit ficar preciso.');
+    }
+  }
+
+  const trained = new Set(Object.keys(treinoKcal).filter(d => treinoKcal[d] > 0));
+  if (rules.train_per_week && hasData) {
+    db.prepare('SELECT date FROM treino WHERE user_id = ? AND date >= ? AND date <= ? AND (musculacao = 1 OR corrida = 1)')
+      .all(uid, ch.start_date, until).forEach(r => trained.add(r.date));
+  }
+
+  const waterMl = {};
+  let waterTarget = 0;
+  if (rules.water_ml_per_kg) {
+    const wcfg = getWaterConfig(uid);
+    waterTarget = rules.water_target_ml || (personFor(uid).peso ? waterTargetMl(personFor(uid).peso, rules.water_ml_per_kg) : wcfg.daily_goal_ml);
+    if (hasData) {
+      db.prepare('SELECT date, bottles FROM water_intake WHERE user_id = ? AND date >= ? AND date <= ?')
+        .all(uid, ch.start_date, until).forEach(r => { waterMl[r.date] = Math.round(r.bottles * wcfg.bottle_size_ml); });
+    }
+  }
+
+  const days = dates.map((date, i) => {
+    const week = Math.floor(i / 7) + 1;
+    const ck = checkins[date] || {};
+    const free = !!ck.free_meal;
+    const future = date > today;
+    const isToday = date === today;
+    const unlogged = isToday ? 'pending' : 'missing';
+    const r = {};
+    if (rules.deficit) {
+      const target = deficitTargetFor(rules, week);
+      const kcal = kcalByDate[date] || 0;
+      const gasto = rotina + (treinoKcal[date] || 0);
+      const value = kcal > 0 && gasto > 0 ? gasto - kcal : null;
+      let status;
+      if (future) status = 'future';
+      else if (free) status = 'free';
+      else if (value == null) status = unlogged;
+      else if (value >= target) status = 'ok';
+      else status = isToday ? 'pending' : 'fail';
+      r.deficit = { status, target, value, kcal, gasto };
+    }
+    if (rules.water_ml_per_kg) {
+      const ml = waterMl[date] || 0;
+      r.water = { status: future ? 'future' : ml >= waterTarget ? 'ok' : isToday ? 'pending' : 'fail', ml, target: waterTarget };
+    }
+    if (rules.no_sugar) {
+      const v = ck.no_sugar == null ? null : ck.no_sugar;
+      r.sugar = { status: future ? 'future' : free ? 'free' : v === 1 ? 'ok' : v === 0 ? 'fail' : unlogged, value: v };
+    }
+    if (rules.train_per_week) {
+      r.train = { status: future ? 'future' : trained.has(date) ? 'ok' : isToday ? 'pending' : 'rest' };
+    }
+    // Dia cumprido = toda regra diária ok (refeição livre conta como ok). Treino é meta semanal.
+    const daily = ['deficit', 'water', 'sugar'].filter(k => r[k]).map(k => r[k].status);
+    const okCount = daily.filter(s => s === 'ok' || s === 'free').length;
+    let status;
+    if (future) status = 'future';
+    else if (daily.length && okCount === daily.length) status = 'done';
+    else if (isToday) status = 'today';
+    else status = 'fail';
+    return { date, n: i + 1, week, status, free_meal: free, ok: okCount, total: daily.length, rules: r };
+  });
+
+  const weeks = [];
+  for (let w = 1; w <= Math.ceil(ch.days / 7); w++) {
+    const wd = days.filter(d => d.week === w);
+    const past = wd.filter(d => d.date <= today);
+    const wk = {
+      n: w, start: wd[0].date, end: wd[wd.length - 1].date, length: wd.length,
+      state: wd[0].date > today ? 'future' : wd[wd.length - 1].date < today ? 'past' : 'current',
+      done: past.filter(d => d.status === 'done').length,
+    };
+    if (rules.deficit) {
+      wk.deficit_target = deficitTargetFor(rules, w);
+      const logged = past.filter(d => d.rules.deficit.value != null && !d.free_meal);
+      wk.deficit_days = logged.length;
+      wk.deficit_avg = logged.length ? Math.round(logged.reduce((a, d) => a + d.rules.deficit.value, 0) / logged.length) : null;
+    }
+    if (rules.free_meals_per_week) {
+      wk.free_allowed = rules.free_meals_per_week;
+      wk.free_used = wd.filter(d => d.free_meal).length;
+    }
+    if (rules.train_per_week) {
+      wk.train_goal = Math.ceil(rules.train_per_week * wd.length / 7);
+      wk.train_count = past.filter(d => d.rules.train.status === 'ok').length;
+    }
+    weeks.push(wk);
+  }
+
+  const elapsed = days.filter(d => d.date <= today);
+  const doneDays = elapsed.filter(d => d.status === 'done').length;
+  // Sequência atual: hoje ainda em aberto não quebra a sequência de ontem
+  let streak = 0;
+  for (let i = elapsed.length - 1; i >= 0; i--) {
+    if (elapsed[i].status === 'done') streak++;
+    else if (elapsed[i].status === 'today') continue;
+    else break;
+  }
+  let best = 0;
+  let run = 0;
+  elapsed.forEach(d => { run = d.status === 'done' ? run + 1 : 0; best = Math.max(best, run); });
+
+  const todayDay = days.find(d => d.date === today) || null;
+  return {
+    id: ch.id, template: ch.template, name: ch.name, theme: ch.theme, emoji: tpl.emoji || '🏁',
+    tagline: tpl.tagline || '', status: ch.status, start_date: ch.start_date, end_date: end,
+    days_total: ch.days, ended_at: ch.ended_at, rules,
+    day_index: today < ch.start_date ? 0 : Math.min(elapsed.length, ch.days),
+    current_week: todayDay ? todayDay.week : null,
+    today: todayDay, days, weeks, warn,
+    stats: { done_days: doneDays, elapsed: elapsed.length, streak, best_streak: best, pct: Math.round((doneDays / ch.days) * 100) },
+  };
+}
+
+function finishExpiredChallenges(uid, today) {
+  const expired = db.prepare(`
+    SELECT * FROM challenges
+    WHERE user_id = ? AND status = 'active' AND date(start_date, '+' || (days - 1) || ' days') < ?
+  `).all(uid, today);
+  expired.forEach(ch => {
+    db.prepare("UPDATE challenges SET status = 'done', ended_at = datetime('now') WHERE id = ?").run(ch.id);
+    const ev = evaluateChallenge(uid, ch, addDaysStr(ch.start_date, ch.days - 1));
+    notify(uid, 'desafio', `fim:${ch.id}`, '🏁', `Desafio concluído: ${ch.name}`, `Você cumpriu ${ev.stats.done_days} de ${ch.days} dias. Bora pro próximo?`);
+  });
+}
+
+function activeChallenge(uid) {
+  return db.prepare("SELECT * FROM challenges WHERE user_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1").get(uid);
+}
+
+app.get('/api/challenges', (req, res) => {
+  const uid = req.session.userId;
+  const today = isDateStr(req.query.today) ? req.query.today : new Date().toLocaleDateString('en-CA');
+  finishExpiredChallenges(uid, today);
+  const active = activeChallenge(uid);
+  const history = db.prepare("SELECT * FROM challenges WHERE user_id = ? AND status != 'active' ORDER BY id DESC LIMIT 10").all(uid)
+    .map(ch => {
+      // Abandonado conta só até o dia em que parou
+      const stop = ch.ended_at ? ch.ended_at.slice(0, 10) : today;
+      const ev = evaluateChallenge(uid, ch, stop < today ? stop : today);
+      return { id: ch.id, name: ch.name, theme: ch.theme, emoji: ev.emoji, status: ch.status, start_date: ch.start_date, end_date: ev.end_date, days_total: ch.days, done_days: ev.stats.done_days, best_streak: ev.stats.best_streak, ended_at: ch.ended_at };
+    });
+  res.json({
+    templates: CHALLENGE_TEMPLATES,
+    peso: personFor(uid).peso || null,
+    active: active ? evaluateChallenge(uid, active, today) : null,
+    history,
+  });
+});
+
+app.post('/api/challenges', (req, res) => {
+  const uid = req.session.userId;
+  const tpl = CHALLENGE_TEMPLATES.find(t => t.id === req.body.template);
+  if (!tpl) return res.status(400).json({ error: 'Desafio inválido' });
+  if (activeChallenge(uid)) return res.status(409).json({ error: 'Você já está em um desafio. Encerre o atual para começar outro.' });
+  const today = isDateStr(req.body.today) ? req.body.today : new Date().toLocaleDateString('en-CA');
+  const start = isDateStr(req.body.start_date) ? req.body.start_date : today;
+  if (start < addDaysStr(today, -30) || start > addDaysStr(today, 30)) {
+    return res.status(400).json({ error: 'Escolha um início em até 30 dias de hoje' });
+  }
+
+  const rules = JSON.parse(JSON.stringify(tpl.rules));
+  if (rules.water_ml_per_kg) {
+    const peso = +req.body.peso > 0 ? Math.min(400, +req.body.peso) : personFor(uid).peso;
+    if (!(peso > 0)) return res.status(400).json({ error: 'Informe seu peso para calcular a meta de água' });
+    rules.water_peso_kg = peso;
+    rules.water_target_ml = waterTargetMl(peso, rules.water_ml_per_kg);
+    // A aba Água passa a mirar a mesma meta do desafio
+    db.prepare('INSERT OR IGNORE INTO water_config (user_id) VALUES (?)').run(uid);
+    db.prepare('UPDATE water_config SET daily_goal_ml = ? WHERE user_id = ?').run(rules.water_target_ml, uid);
+  }
+
+  const info = db.prepare('INSERT INTO challenges (user_id, template, name, theme, start_date, days, rules) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(uid, tpl.id, tpl.name, tpl.theme, start, tpl.days, JSON.stringify(rules));
+  notify(uid, 'desafio', `inicio:${info.lastInsertRowid}`, tpl.emoji, `Desafio iniciado: ${tpl.name}`, `${tpl.days} dias a partir de ${start.split('-').reverse().join('/')}. Foco!`);
+  const ch = db.prepare('SELECT * FROM challenges WHERE id = ?').get(info.lastInsertRowid);
+  res.status(201).json(evaluateChallenge(uid, ch, today));
+});
+
+// Check-in do dia: açúcar e/ou refeição livre (só dias do desafio até hoje)
+app.post('/api/challenges/:id/checkin', (req, res) => {
+  const uid = req.session.userId;
+  const ch = db.prepare("SELECT * FROM challenges WHERE id = ? AND user_id = ? AND status = 'active'").get(+req.params.id, uid);
+  if (!ch) return res.status(404).json({ error: 'Desafio não encontrado' });
+  const rules = JSON.parse(ch.rules);
+  const today = isDateStr(req.body.today) ? req.body.today : new Date().toLocaleDateString('en-CA');
+  const date = String(req.body.date || '');
+  const end = addDaysStr(ch.start_date, ch.days - 1);
+  if (!isDateStr(date) || date < ch.start_date || date > end || date > today) {
+    return res.status(400).json({ error: 'Dia fora do desafio' });
+  }
+
+  db.prepare('INSERT OR IGNORE INTO challenge_checkins (challenge_id, date) VALUES (?, ?)').run(ch.id, date);
+  if (req.body.no_sugar !== undefined) {
+    if (!rules.no_sugar) return res.status(400).json({ error: 'Este desafio não tem a regra do açúcar' });
+    const v = req.body.no_sugar === null ? null : (req.body.no_sugar ? 1 : 0);
+    db.prepare('UPDATE challenge_checkins SET no_sugar = ? WHERE challenge_id = ? AND date = ?').run(v, ch.id, date);
+  }
+  if (req.body.free_meal !== undefined) {
+    const on = req.body.free_meal ? 1 : 0;
+    if (on) {
+      if (!rules.free_meals_per_week) return res.status(400).json({ error: 'Este desafio não tem refeição livre' });
+      const idx = Math.round((new Date(date + 'T12:00:00') - new Date(ch.start_date + 'T12:00:00')) / 86400000);
+      const wStart = addDaysStr(ch.start_date, Math.floor(idx / 7) * 7);
+      const used = db.prepare('SELECT COUNT(*) n FROM challenge_checkins WHERE challenge_id = ? AND free_meal = 1 AND date >= ? AND date <= ? AND date != ?')
+        .get(ch.id, wStart, addDaysStr(wStart, 6), date).n;
+      if (used >= rules.free_meals_per_week) {
+        return res.status(400).json({ error: 'Você já usou a refeição livre desta semana do desafio' });
+      }
+    }
+    db.prepare('UPDATE challenge_checkins SET free_meal = ? WHERE challenge_id = ? AND date = ?').run(on, ch.id, date);
+  }
+  res.json(evaluateChallenge(uid, ch, today));
+});
+
+app.post('/api/challenges/:id/abandon', (req, res) => {
+  const result = db.prepare("UPDATE challenges SET status = 'abandoned', ended_at = datetime('now') WHERE id = ? AND user_id = ? AND status = 'active'")
+    .run(+req.params.id, req.session.userId);
+  if (!result.changes) return res.status(404).json({ error: 'Desafio não encontrado' });
+  res.json({ success: true });
+});
+
 // Retrospectiva dos últimos 30 dias (estilo wrapped)
 app.get('/api/wrapped', (req, res) => {
   const uid = req.session.userId;
@@ -2000,6 +2317,21 @@ function buildAiContext(uid) {
   }
   if (d7 && d7.days) {
     lines.push(`Últimos 7 dias (${d7.days} dias registrados): média de ${Math.round(d7.kcal / d7.days)} kcal, ${Math.round(d7.prot / d7.days)} g proteína, ${Math.round(d7.carb / d7.days)} g carboidrato, ${Math.round(d7.fat / d7.days)} g gordura por dia.`);
+  }
+
+  // Desafio em andamento
+  const ch = activeChallenge(uid);
+  if (ch && ch.start_date <= today) {
+    const ev = evaluateChallenge(uid, ch, today);
+    const r = ev.rules;
+    const regras = [];
+    if (r.deficit) regras.push(`déficit diário de ${deficitTargetFor(r, ev.current_week || 1)} kcal nesta semana (plano por semana: ${r.deficit.weeks.join(', ')})`);
+    if (r.no_sugar) regras.push('sem açúcar');
+    if (r.free_meals_per_week) regras.push(`${r.free_meals_per_week} refeição livre por semana`);
+    if (r.water_target_ml) regras.push(`${r.water_target_ml} ml de água por dia`);
+    if (r.train_per_week) regras.push(`${r.train_per_week} treinos por semana`);
+    lines.push(`\nDesafio em andamento: "${ev.name}", dia ${ev.day_index} de ${ev.days_total} (semana ${ev.current_week}). Regras: ${regras.join('; ')}.`);
+    lines.push(`Cumpriu ${ev.stats.done_days} de ${ev.stats.elapsed} dias até agora; sequência atual de ${ev.stats.streak} dias.`);
   }
 
   return lines.join('\n');

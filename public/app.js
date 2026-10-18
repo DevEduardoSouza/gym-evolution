@@ -1105,6 +1105,7 @@ async function migrateProfile() {
 // ======== TAB SWITCHING ========
 const TAB_TITLES = {
   hoje: 'Hoje',
+  desafios: 'Desafios',
   medicoes: 'Corpo',
   agua: 'Água',
   dieta: 'Dieta',
@@ -1153,6 +1154,7 @@ document.querySelectorAll('.nav-btn[data-tab]').forEach(btn => {
     if (tab === 'agua') loadWaterData();
     if (tab === 'dieta') loadDietaData();
     if (tab === 'balanco') loadBalanco();
+    if (tab === 'desafios') loadDesafios();
     if (tab === 'treino') loadTreinoData();
     if (tab === 'ciclo') loadCicloData();
     if (tab === 'ia') initAiChat();
@@ -1458,6 +1460,7 @@ const ICONS = {
   file: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>',
   plus: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
   flame: '<svg class="icon-svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2c-1 4-4 5-4 9 0 1.5.5 2.5 1.5 3.5C8 14 7.5 12 9 10c.5 3 2 4 3 5 1.5 1.5 1 3.5-.5 4.5C15 19 18 17 18 13c0-5-3-7-6-11z"/></svg>',
+  flag: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></svg>',
   target: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg>',
   // Bonus
   edit: '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="m18.5 2.5 3 3L12 15l-4 1 1-4z"/></svg>',
@@ -2737,6 +2740,7 @@ async function loadHojeData() {
     api('GET', `/api/calorias?date=${today}`),
   ]);
   renderHoje(plan, logs, gami, tstats, wcfg, wint, ranking, kcal);
+  refreshChallenge();
 }
 
 
@@ -4965,6 +4969,480 @@ document.getElementById('ai-form').addEventListener('submit', (e) => {
 
 document.querySelectorAll('#ai-suggestions .ai-chip').forEach((chip) => {
   chip.addEventListener('click', () => aiSend(chip.textContent));
+});
+
+// ======== DESAFIOS ========
+// O servidor avalia tudo (déficit, água, treino e check-ins); aqui só desenha.
+// Com um desafio ativo o app entra no "modo desafio": classe no <body> com a cor do
+// tema, chip na barra lateral e capa na tela Hoje.
+let chData = null;      // resposta de /api/challenges
+let chStartTpl = null;  // modelo escolhido no modal de início
+let chDayOpen = null;   // data aberta no modal do dia
+
+const CH_THEMES = ['fire', 'bolt', 'leaf', 'water', 'iron'];
+const fmtL = ml => (ml / 1000).toFixed(1).replace('.', ',');
+const fmtBRn = n => Number(Math.round(n)).toLocaleString('pt-BR');
+const dmStr = s => `${s.slice(8, 10)}/${s.slice(5, 7)}`;
+
+function chAddDays(dateStr, n) {
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() + n);
+  return d.toLocaleDateString('en-CA');
+}
+
+async function refreshChallenge() {
+  try {
+    chData = await api('GET', `/api/challenges?today=${todayStr()}`);
+  } catch { return; }
+  applyChallengeMode();
+  renderChallengeBanner();
+  if (document.getElementById('tab-desafios').classList.contains('active')) renderDesafios();
+}
+
+async function loadDesafios() {
+  if (chData) renderDesafios();
+  await refreshChallenge();
+}
+
+function applyChallengeMode() {
+  const ch = chData && chData.active;
+  document.body.classList.toggle('challenge-mode', !!ch);
+  CH_THEMES.forEach(t => document.body.classList.toggle('ch-theme-' + t, !!ch && ch.theme === t));
+  const chip = document.getElementById('nav-ch-chip');
+  chip.hidden = !ch;
+  if (ch) chip.textContent = ch.day_index > 0 ? `${ch.day_index}/${ch.days_total}` : 'em breve';
+}
+
+// Texto das regras de um modelo (catálogo e modal de início)
+function chRulesText(rules, peso) {
+  const out = [];
+  if (rules.deficit) {
+    const w = rules.deficit.weeks;
+    out.push(w.length > 1
+      ? `Déficit diário por semana: ${w.map(fmtBRn).join(' → ')} kcal`
+      : `Déficit de ${fmtBRn(w[0])} kcal por dia`);
+  }
+  if (rules.no_sugar) out.push('Zero açúcar');
+  if (rules.free_meals_per_week) out.push(`${rules.free_meals_per_week} refeição livre por semana (libera açúcar e déficit no dia)`);
+  if (rules.water_ml_per_kg) {
+    const kgPerL = 1000 / rules.water_ml_per_kg;
+    const base = Number.isInteger(kgPerL) ? `1 L a cada ${kgPerL} kg de peso` : `${rules.water_ml_per_kg} ml por kg de peso`;
+    const mine = peso ? ` (≈ ${fmtL(Math.round((peso * rules.water_ml_per_kg) / 50) * 50)} L pra você)` : '';
+    out.push(`Água: ${base}${mine}`);
+  }
+  if (rules.train_per_week) out.push(`${rules.train_per_week} treinos por semana`);
+  return out;
+}
+
+// Linhas de regra de um dia: usadas no card "Hoje" e no modal de um dia passado
+function chRuleRows(ch, day) {
+  const r = day.rules;
+  const wk = ch.weeks[day.week - 1];
+  const isToday = day.date === todayStr();
+  const rows = [];
+  if (r.deficit) {
+    const d = r.deficit;
+    let sub;
+    let pct = null;
+    if (d.status === 'free') sub = 'Refeição livre: dia isento do déficit';
+    else if (d.value == null) sub = isToday ? 'Registre as refeições na Dieta para medir' : 'Nenhuma refeição registrada nesse dia';
+    else {
+      sub = (d.value >= 0 ? `${fmtBRn(d.value)} de ${fmtBRn(d.target)} kcal` : `Superávit de ${fmtBRn(-d.value)} kcal`)
+        + ` · comeu ${fmtBRn(d.kcal)}, gasto ~${fmtBRn(d.gasto)}`;
+      pct = Math.max(0, Math.min(100, (d.value / d.target) * 100));
+    }
+    rows.push({
+      key: 'deficit', icon: '⚖️', title: `Déficit de ${fmtBRn(d.target)} kcal`, sub, status: d.status, pct,
+      act: isToday && d.status !== 'free' && d.status !== 'ok' ? '<button type="button" class="btn-secondary btn-sm" data-act="tab" data-tab="dieta">Dieta</button>' : '',
+    });
+  }
+  if (r.water) {
+    const w = r.water;
+    rows.push({
+      key: 'water', icon: '💧', title: `Água: ${fmtL(w.target)} L`, sub: `${fmtL(w.ml)} de ${fmtL(w.target)} L`, status: w.status,
+      pct: Math.min(100, (w.ml / w.target) * 100),
+      act: isToday && w.status !== 'ok' ? '<button type="button" class="btn-secondary btn-sm" data-act="bottle">+ Garrafa</button>' : '',
+    });
+  }
+  if (r.sugar) {
+    const s = r.sugar;
+    const sub = s.status === 'free' ? 'Refeição livre: açúcar liberado' : s.value === 1 ? 'Cumprido' : s.value === 0 ? 'Escorregou, amanhã tem mais' : 'Como foi o dia?';
+    rows.push({
+      key: 'sugar', icon: '🍬', title: 'Zero açúcar', sub, status: s.status,
+      act: s.status === 'free' ? '' : `<div class="ch-seg">
+        <button type="button" data-act="sugar" data-v="1" class="${s.value === 1 ? 'on ok' : ''}">Sem açúcar</button>
+        <button type="button" data-act="sugar" data-v="0" class="${s.value === 0 ? 'on fail' : ''}">Comi</button>
+      </div>`,
+    });
+  }
+  if (wk.free_allowed) {
+    const left = wk.free_allowed - wk.free_used;
+    rows.push({
+      key: 'free', icon: '🍔', title: 'Refeição livre', status: day.free_meal ? 'free' : 'neutral',
+      sub: day.free_meal ? 'Usada neste dia' : left > 0 ? `${left} disponível na semana ${day.week}` : `Já usada na semana ${day.week}`,
+      act: day.free_meal
+        ? '<button type="button" class="btn-secondary btn-sm" data-act="free" data-v="0">Desfazer</button>'
+        : `<button type="button" class="btn-secondary btn-sm" data-act="free" data-v="1" ${left > 0 ? '' : 'disabled'}>Usar</button>`,
+    });
+  }
+  if (r.train) {
+    rows.push({
+      key: 'train', icon: '🏋️', title: `Treinos da semana: ${wk.train_count}/${wk.train_goal}`, status: r.train.status === 'rest' ? 'neutral' : r.train.status,
+      sub: r.train.status === 'ok' ? 'Treinou neste dia' : 'Sem treino registrado',
+      act: isToday && r.train.status !== 'ok' ? '<button type="button" class="btn-secondary btn-sm" data-act="tab" data-tab="ciclo">Treino</button>' : '',
+    });
+  }
+  return rows;
+}
+
+function chRulesHtml(rows) {
+  const ic = x => (x.status === 'ok' ? '✓' : x.status === 'fail' ? '✕' : x.icon);
+  return rows.map(x => `
+    <div class="ch-rule st-${x.status}">
+      <span class="ch-rule-ic">${ic(x)}</span>
+      <div class="ch-rule-txt">
+        <b>${esc(x.title)}</b><span>${esc(x.sub)}</span>
+        ${x.pct != null ? `<div class="ch-rule-bar"><i style="width:${x.pct}%"></i></div>` : ''}
+      </div>
+      <div class="ch-rule-act">${x.act || ''}</div>
+    </div>`).join('');
+}
+
+function bindChRuleActions(container, date) {
+  container.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', async e => {
+    e.stopPropagation();
+    const act = b.dataset.act;
+    if (act === 'tab') {
+      closeChDay();
+      document.querySelector(`.nav-btn[data-tab="${b.dataset.tab}"]`).click();
+      return;
+    }
+    b.disabled = true;
+    if (act === 'bottle') {
+      const [wcfg, wint] = await Promise.all([
+        api('GET', '/api/water-config'),
+        api('GET', `/api/water-intake?year=${date.slice(0, 4)}`),
+      ]);
+      const rec = wint.find(r => r.date === date);
+      await api('POST', '/api/water-intake', { date, bottles: (rec ? rec.bottles : 0) + 1 });
+      toastMsg(`+${fmtL(wcfg.bottle_size_ml)} L 💧`);
+      const before = chDayStatus(date);
+      await refreshChallenge();
+      celebrateChDay(date, before);
+      return;
+    }
+    const body = { date, today: todayStr() };
+    // Clicar de novo no botão marcado desfaz o check-in
+    if (act === 'sugar') body.no_sugar = b.classList.contains('on') ? null : +b.dataset.v;
+    else body.free_meal = +b.dataset.v;
+    const before = chDayStatus(date);
+    const res = await api('POST', `/api/challenges/${chData.active.id}/checkin`, body);
+    if (res.error) {
+      toastMsg(res.error);
+      b.disabled = false;
+      return;
+    }
+    chData.active = res;
+    applyChallengeMode();
+    renderChallengeBanner();
+    renderDesafios();
+    if (chDayOpen) renderChDay();
+    if (act === 'free' && body.free_meal) toastMsg('Refeição livre liberada. Aproveita! 🍔');
+    celebrateChDay(date, before);
+  }));
+}
+
+function chDayStatus(date) {
+  const d = chData && chData.active && chData.active.days.find(x => x.date === date);
+  return d ? d.status : null;
+}
+
+function celebrateChDay(date, before) {
+  if (before !== 'done' && chDayStatus(date) === 'done') {
+    confetti();
+    toastMsg(date === todayStr() ? 'Dia do desafio cumprido! 🏆' : 'Dia marcado como cumprido ✓');
+  }
+}
+
+function renderDesafios() {
+  if (!chData) return;
+  const act = document.getElementById('ch-active');
+  const cat = document.getElementById('ch-catalog');
+  act.hidden = !chData.active;
+  cat.hidden = !!chData.active;
+  if (chData.active) renderChActive(chData.active);
+  else renderChCatalog();
+}
+
+function renderChActive(ch) {
+  const today = todayStr();
+  const started = ch.day_index > 0;
+  const wk = ch.current_week ? ch.weeks[ch.current_week - 1] : null;
+  const startsIn = Math.round((new Date(ch.start_date + 'T12:00:00') - new Date(today + 'T12:00:00')) / 86400000);
+  const ticks = ch.days.map(d => `<i class="t-${d.status}${d.date === today ? ' t-now' : ''}"></i>`).join('');
+
+  const cover = `
+    <div class="ch-cover">
+      <span class="ch-cover-emoji" aria-hidden="true">${ch.emoji}</span>
+      <div class="ch-cover-top">
+        <span class="ch-live"><i></i>${started ? 'Em desafio' : 'Começa em breve'}</span>
+        <span class="ch-cover-dates">${dmStr(ch.start_date)} → ${dmStr(ch.end_date)}</span>
+      </div>
+      <h2>${esc(ch.name)}</h2>
+      <p class="ch-cover-tag">${esc(ch.tagline)}</p>
+      <div class="ch-cover-main">
+        <div class="ch-daycount">${started
+          ? `<b>Dia ${ch.day_index}</b><span>de ${ch.days_total}</span>`
+          : `<b>${startsIn === 1 ? 'Amanhã' : `Em ${startsIn} dias`}</b><span>${formatDate(ch.start_date)}</span>`}</div>
+        <div class="ch-cover-stats">
+          <div><b>${ch.stats.streak}</b><span>🔥 sequência</span></div>
+          <div><b>${ch.stats.done_days}/${ch.stats.elapsed}</b><span>dias cumpridos</span></div>
+          ${wk && wk.deficit_target
+            ? `<div><b>−${fmtBRn(wk.deficit_target)}</b><span>kcal/dia · semana ${wk.n}</span></div>`
+            : wk ? `<div><b>${wk.n}/${ch.weeks.length}</b><span>semana</span></div>` : ''}
+        </div>
+      </div>
+      <div class="ch-ticks" style="--n:${ch.days_total}">${ticks}</div>
+    </div>`;
+
+  const warn = ch.warn.length ? `<div class="ch-warn">${ch.warn.map(esc).join('<br>')}</div>` : '';
+
+  const todayCard = ch.today ? `
+    <div class="hoje-card ch-today-card">
+      <div class="hoje-card-head">
+        <h3>Hoje · dia ${ch.today.n}</h3>
+        <span class="ch-score st-${ch.today.status}">${ch.today.status === 'done' ? 'Cumprido ✓' : `${ch.today.ok}/${ch.today.total} regras`}</span>
+      </div>
+      <div class="ch-rules" id="ch-today-rules">${chRulesHtml(chRuleRows(ch, ch.today))}</div>
+    </div>` : `
+    <div class="hoje-card ch-today-card">
+      <div class="hoje-card-head"><h3>Prepare-se</h3></div>
+      <p class="hb-sub">O desafio começa em ${formatDate(ch.start_date)}. Até lá, atualize o peso em Corpo e o perfil para as contas saírem certas.</p>
+    </div>`;
+
+  // Plano: ondas de déficit por semana (altura = meta) ou só a lista de regras
+  let plan = '';
+  if (ch.rules.deficit) {
+    const max = Math.max(...ch.weeks.map(w => w.deficit_target));
+    plan = `<div class="ch-wave">${ch.weeks.map(w => {
+      const hit = w.deficit_avg != null && w.deficit_avg >= w.deficit_target;
+      const avgH = w.deficit_avg != null ? Math.max(0, Math.min(100, (w.deficit_avg / max) * 100)) : null;
+      return `<div class="ch-wave-col w-${w.state}" title="Semana ${w.n}: meta de ${fmtBRn(w.deficit_target)} kcal/dia${w.deficit_avg != null ? ` · média ${fmtBRn(w.deficit_avg)}` : ''}">
+        <span class="ch-wave-val">${fmtBRn(w.deficit_target)}</span>
+        <div class="ch-wave-track"><div class="ch-wave-bar" style="height:${(w.deficit_target / max) * 100}%"></div>${avgH != null ? `<i class="ch-wave-avg ${hit ? 'hit' : 'miss'}" style="bottom:${avgH}%"></i>` : ''}</div>
+        <span class="ch-wave-lbl">S${w.n}</span>
+      </div>`;
+    }).join('')}</div>
+    <p class="hb-note">Barra = meta diária de déficit da semana. Marcador = média alcançada (verde bateu, vermelho ficou abaixo).</p>`;
+  }
+  const rulesCard = `
+    <div class="hoje-card ch-plan-card">
+      <div class="hoje-card-head"><h3>Regras</h3></div>
+      <ul class="ch-rule-list">${chRulesText(ch.rules, ch.rules.water_peso_kg).map(x => `<li>${esc(x)}</li>`).join('')}</ul>
+      ${plan}
+      <button type="button" class="ch-abandon" id="btn-ch-abandon">Encerrar desafio</button>
+    </div>`;
+
+  const weeks = ch.weeks.map(w => {
+    const cells = ch.days.filter(d => d.week === w.n).map(d => `
+      <button type="button" class="ch-cell c-${d.status}${d.date === today ? ' c-now' : ''}" data-date="${d.date}" ${d.status === 'future' ? 'disabled' : ''} title="${formatDate(d.date)}">
+        <span>${d.n}</span>${d.free_meal ? '<em>🍔</em>' : ''}
+      </button>`).join('');
+    const sum = [];
+    if (w.state !== 'future') {
+      sum.push(`${w.done}/${w.length} dias`);
+      if (w.deficit_avg != null) sum.push(`<span class="${w.deficit_avg >= w.deficit_target ? 'good' : 'bad'}">média ${w.deficit_avg >= 0 ? '' : '+'}${fmtBRn(Math.abs(w.deficit_avg))} kcal</span>`);
+      if (w.train_goal) sum.push(`<span class="${w.train_count >= w.train_goal ? 'good' : ''}">treinos ${w.train_count}/${w.train_goal}</span>`);
+      if (w.free_allowed && w.free_used) sum.push('🍔 usada');
+    }
+    return `
+      <div class="ch-week w-${w.state}">
+        <div class="ch-week-lbl"><b>Semana ${w.n}</b>${w.deficit_target ? `<span>−${fmtBRn(w.deficit_target)} kcal/dia</span>` : ''}</div>
+        <div class="ch-week-cells">${cells}</div>
+        <div class="ch-week-sum">${sum.join(' · ')}</div>
+      </div>`;
+  }).join('');
+  const journey = `
+    <div class="hoje-card ch-journey-card">
+      <div class="hoje-card-head">
+        <h3>Jornada</h3>
+        <span class="table-hint">Toque num dia para ver ou corrigir o check-in</span>
+      </div>
+      <div class="ch-legend">
+        <span><i class="c-done"></i>cumprido</span><span><i class="c-fail"></i>falhou</span><span><i class="c-today"></i>hoje</span><span><i class="c-future"></i>a seguir</span>
+      </div>
+      <div class="ch-weeks">${weeks}</div>
+    </div>`;
+
+  const el = document.getElementById('ch-active');
+  el.innerHTML = cover + warn + `<div class="ch-grid">${todayCard}${rulesCard}</div>` + journey;
+  if (ch.today) bindChRuleActions(document.getElementById('ch-today-rules'), ch.today.date);
+  el.querySelectorAll('.ch-cell[data-date]').forEach(c => c.addEventListener('click', () => openChDay(c.dataset.date)));
+  document.getElementById('btn-ch-abandon').addEventListener('click', async () => {
+    if (!confirm(`Encerrar "${ch.name}"? O progresso fica no histórico, mas o desafio para aqui.`)) return;
+    const res = await api('POST', `/api/challenges/${ch.id}/abandon`);
+    if (res.error) return toastMsg(res.error);
+    toastMsg('Desafio encerrado');
+    refreshChallenge();
+  });
+}
+
+function renderChCatalog() {
+  const box = document.getElementById('ch-templates');
+  box.innerHTML = chData.templates.map(t => `
+    <div class="ch-tpl ch-t-${t.theme}">
+      <div class="ch-tpl-cover"><span class="ch-tpl-emoji">${t.emoji}</span><span class="ch-tpl-days">${t.days} dias</span></div>
+      <div class="ch-tpl-body">
+        <h3>${esc(t.name)}</h3>
+        <p>${esc(t.tagline)}</p>
+        <ul class="ch-rule-list">${chRulesText(t.rules, chData.peso).map(x => `<li>${esc(x)}</li>`).join('')}</ul>
+        <button type="button" class="btn-primary btn-sm" data-tpl="${t.id}">Começar</button>
+      </div>
+    </div>`).join('');
+  box.querySelectorAll('[data-tpl]').forEach(b => b.addEventListener('click', () => {
+    openChStart(chData.templates.find(t => t.id === b.dataset.tpl));
+  }));
+  animateIn(box.children, 0.05);
+
+  const STATUS = { done: 'Concluído', abandoned: 'Encerrado' };
+  const hist = chData.history || [];
+  document.getElementById('ch-history-card').hidden = !hist.length;
+  document.getElementById('ch-history').innerHTML = hist.map(h => `
+    <div class="ch-hist ch-t-${h.theme}">
+      <span class="ch-hist-emoji">${h.emoji}</span>
+      <span class="ch-hist-txt"><b>${esc(h.name)}</b><small>${dmStr(h.start_date)} → ${dmStr(h.end_date)} · ${STATUS[h.status] || h.status}</small></span>
+      <span class="ch-hist-score"><b>${h.done_days}/${h.days_total}</b><small>dias · melhor sequência ${h.best_streak}</small></span>
+    </div>`).join('');
+}
+
+// ---- Modal: começar desafio ----
+const modalChStart = document.getElementById('modal-ch-start');
+
+function openChStart(t) {
+  chStartTpl = t;
+  modalChStart.querySelector('.modal').className = `modal ch-modal ch-t-${t.theme}`;
+  const cover = document.getElementById('chs-cover');
+  cover.innerHTML = `<span class="ch-tpl-emoji">${t.emoji}</span><div><h2>${esc(t.name)}</h2><p>${t.days} dias · ${esc(t.tagline)}</p></div>`;
+  document.getElementById('chs-rules').innerHTML = chRulesText(t.rules, null).map(x => `<li>${esc(x)}</li>`).join('');
+  document.getElementById('chs-date').value = todayStr();
+  document.getElementById('chs-peso-group').style.display = t.rules.water_ml_per_kg ? '' : 'none';
+  document.getElementById('chs-peso').value = chData.peso || '';
+  updateChsPreview();
+  modalChStart.classList.remove('hidden');
+}
+
+function updateChsPreview() {
+  const t = chStartTpl;
+  if (!t) return;
+  const start = document.getElementById('chs-date').value || todayStr();
+  const bits = [`Termina em ${formatDate(chAddDays(start, t.days - 1))}.`];
+  if (t.rules.water_ml_per_kg) {
+    const peso = parseFloat(document.getElementById('chs-peso').value);
+    bits.push(peso > 0
+      ? `Meta de água: ${fmtL(Math.round((peso * t.rules.water_ml_per_kg) / 50) * 50)} L por dia (a aba Água passa a usar essa meta).`
+      : 'Informe o peso para calcular a meta de água.');
+  }
+  if (t.rules.deficit) bits.push('O déficit usa a mesma conta da aba Balanço, então registre as refeições todo dia.');
+  document.getElementById('chs-preview').textContent = bits.join(' ');
+}
+
+document.getElementById('chs-date').addEventListener('input', updateChsPreview);
+document.getElementById('chs-peso').addEventListener('input', updateChsPreview);
+document.querySelectorAll('#modal-ch-start [data-start]').forEach(b => b.addEventListener('click', () => {
+  const today = todayStr();
+  if (b.dataset.start === 'today') {
+    document.getElementById('chs-date').value = today;
+  } else {
+    const wd = (new Date(today + 'T12:00:00').getDay() + 6) % 7; // 0 = segunda
+    document.getElementById('chs-date').value = chAddDays(today, 7 - wd);
+  }
+  updateChsPreview();
+}));
+document.getElementById('btn-chs-cancel').addEventListener('click', () => modalChStart.classList.add('hidden'));
+modalChStart.addEventListener('click', e => { if (e.target === modalChStart) modalChStart.classList.add('hidden'); });
+
+document.getElementById('ch-start-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const btn = document.getElementById('btn-chs-go');
+  btn.disabled = true;
+  const res = await api('POST', '/api/challenges', {
+    template: chStartTpl.id,
+    start_date: document.getElementById('chs-date').value,
+    peso: parseFloat(document.getElementById('chs-peso').value) || null,
+    today: todayStr(),
+  });
+  btn.disabled = false;
+  if (res.error) return toastMsg(res.error);
+  modalChStart.classList.add('hidden');
+  chData.active = res;
+  applyChallengeMode();
+  renderChallengeBanner();
+  renderDesafios();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  confetti();
+  toastMsg(`${res.emoji} Desafio iniciado. Bora!`);
+});
+
+// ---- Modal: um dia do desafio ----
+const modalChDay = document.getElementById('modal-ch-day');
+
+function openChDay(date) {
+  chDayOpen = date;
+  renderChDay();
+  modalChDay.classList.remove('hidden');
+}
+
+function closeChDay() {
+  chDayOpen = null;
+  modalChDay.classList.add('hidden');
+}
+
+function renderChDay() {
+  const ch = chData && chData.active;
+  const d = ch && ch.days.find(x => x.date === chDayOpen);
+  if (!d) return closeChDay();
+  const wd = (new Date(d.date + 'T12:00:00').getDay() + 6) % 7;
+  const STATUS = { done: 'Dia cumprido ✓', fail: `${d.ok}/${d.total} regras cumpridas`, today: `Hoje · ${d.ok}/${d.total} regras até agora` };
+  document.getElementById('chd-title').textContent = `Dia ${d.n} · ${WEEKDAY_NAMES[wd]}, ${dmStr(d.date)}`;
+  document.getElementById('chd-sub').textContent = STATUS[d.status] || '';
+  const box = document.getElementById('chd-rules');
+  box.innerHTML = chRulesHtml(chRuleRows(ch, d));
+  bindChRuleActions(box, d.date);
+}
+
+document.getElementById('btn-chd-close').addEventListener('click', closeChDay);
+modalChDay.addEventListener('click', e => { if (e.target === modalChDay) closeChDay(); });
+
+// ---- Capa do desafio na tela Hoje ----
+function renderChallengeBanner() {
+  const el = document.getElementById('hoje-challenge');
+  const ch = chData && chData.active;
+  el.hidden = !ch;
+  if (!ch) return;
+  const t = ch.today;
+  const wk = ch.current_week ? ch.weeks[ch.current_week - 1] : null;
+  const IC = { deficit: '⚖️', water: '💧', sugar: '🍬', train: '🏋️' };
+  const pills = t ? ['deficit', 'water', 'sugar', 'train'].filter(k => t.rules[k]).map(k => {
+    const r = t.rules[k];
+    let label;
+    if (k === 'deficit') label = r.value != null && r.status !== 'free' ? `${fmtBRn(Math.max(0, r.value))}/${fmtBRn(r.target)}` : r.status === 'free' ? 'livre' : 'déficit';
+    else if (k === 'water') label = `${fmtL(r.ml)}/${fmtL(r.target)} L`;
+    else if (k === 'sugar') label = r.status === 'ok' ? 'sem açúcar' : r.status === 'fail' ? 'açúcar' : r.status === 'free' ? 'livre' : 'açúcar?';
+    else label = `${wk.train_count}/${wk.train_goal}`;
+    return `<span class="ch-pill st-${r.status}">${IC[k]} ${label}</span>`;
+  }).join('') : '';
+  const sub = t
+    ? `Dia ${ch.day_index} de ${ch.days_total}${wk && wk.deficit_target ? ` · déficit de ${fmtBRn(wk.deficit_target)} kcal/dia` : ''}`
+    : `Começa em ${formatDate(ch.start_date)}`;
+  el.innerHTML = `
+    <span class="ch-banner-emoji" aria-hidden="true">${ch.emoji}</span>
+    <span class="ch-banner-txt"><small>${sub}</small><b>${esc(ch.name)}</b></span>
+    <span class="ch-banner-pills">${pills}</span>
+    <span class="ch-banner-bar"><i style="width:${(ch.day_index / ch.days_total) * 100}%"></i></span>`;
+}
+
+document.getElementById('hoje-challenge').addEventListener('click', () => {
+  document.querySelector('.nav-btn[data-tab="desafios"]').click();
 });
 
 // Init
