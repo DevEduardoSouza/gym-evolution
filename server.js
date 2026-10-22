@@ -1705,7 +1705,7 @@ const CHALLENGE_TEMPLATES = [
   {
     id: 'seca60', name: 'Desafio 60 dias', emoji: '🔥', theme: 'fire', days: 60,
     tagline: 'Déficit progressivo, zero açúcar e 4 L de água por dia.',
-    rules: { deficit: { weeks: [350, 500, 600, 700, 800, 1000, 1000] }, no_sugar: true, free_meals_per_week: 1, water_ml: 4000 },
+    rules: { deficit: { weeks: [350, 500, 600, 700, 800, 900, 1000, 1100, 1200] }, no_sugar: true, free_meals_per_week: 1, water_ml: 4000 },
   },
   {
     id: 'deficit30', name: '30 dias no déficit', emoji: '⚡', theme: 'bolt', days: 30,
