@@ -5024,7 +5024,9 @@ function chRulesText(rules, peso) {
   }
   if (rules.no_sugar) out.push('Zero açúcar');
   if (rules.free_meals_per_week) out.push(`${rules.free_meals_per_week} refeição livre por semana (libera açúcar e déficit no dia)`);
-  if (rules.water_ml_per_kg) {
+  if (rules.water_ml) {
+    out.push(`Água: ${fmtL(rules.water_ml)} L por dia`);
+  } else if (rules.water_ml_per_kg) {
     const kgPerL = 1000 / rules.water_ml_per_kg;
     const base = Number.isInteger(kgPerL) ? `1 L a cada ${kgPerL} kg de peso` : `${rules.water_ml_per_kg} ml por kg de peso`;
     const mine = peso ? ` (≈ ${fmtL(Math.round((peso * rules.water_ml_per_kg) / 50) * 50)} L pra você)` : '';
@@ -5336,7 +5338,9 @@ function updateChsPreview() {
   if (!t) return;
   const start = document.getElementById('chs-date').value || todayStr();
   const bits = [`Termina em ${formatDate(chAddDays(start, t.days - 1))}.`];
-  if (t.rules.water_ml_per_kg) {
+  if (t.rules.water_ml) {
+    bits.push(`Meta de água: ${fmtL(t.rules.water_ml)} L por dia (a aba Água passa a usar essa meta).`);
+  } else if (t.rules.water_ml_per_kg) {
     const peso = parseFloat(document.getElementById('chs-peso').value);
     bits.push(peso > 0
       ? `Meta de água: ${fmtL(Math.round((peso * t.rules.water_ml_per_kg) / 50) * 50)} L por dia (a aba Água passa a usar essa meta).`

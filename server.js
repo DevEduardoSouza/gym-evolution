@@ -1699,12 +1699,13 @@ app.get('/api/diet-report', (req, res) => {
 //   no_sugar             check-in diário "sem açúcar"
 //   free_meals_per_week  refeições livres por semana do desafio (o dia fica isento de açúcar e déficit)
 //   water_ml_per_kg      meta de água pelo peso (50 ml/kg = 1 L a cada 20 kg), fixada no início
+//   water_ml             meta de água fixa por dia (ml), sem depender do peso
 //   train_per_week       dias de treino por semana
 const CHALLENGE_TEMPLATES = [
   {
     id: 'seca60', name: 'Desafio 60 dias', emoji: '🔥', theme: 'fire', days: 60,
-    tagline: 'Déficit em ondas, zero açúcar e hidratação no talo.',
-    rules: { deficit: { weeks: [1000, 750, 500, 500, 500, 750, 1000, 1000] }, no_sugar: true, free_meals_per_week: 1, water_ml_per_kg: 50 },
+    tagline: 'Déficit progressivo, zero açúcar e 4 L de água por dia.',
+    rules: { deficit: { weeks: [350, 500, 600, 700, 800, 1000, 1000] }, no_sugar: true, free_meals_per_week: 1, water_ml: 4000 },
   },
   {
     id: 'deficit30', name: '30 dias no déficit', emoji: '⚡', theme: 'bolt', days: 30,
@@ -1747,6 +1748,8 @@ function deficitTargetFor(rules, week) {
 function waterTargetMl(pesoKg, mlPerKg) {
   return Math.round((pesoKg * mlPerKg) / 50) * 50;
 }
+
+const hasWaterRule = rules => !!(rules.water_ml_per_kg || rules.water_ml);
 
 // Monta o quadro completo do desafio: status de cada regra em cada dia, resumo por semana e
 // sequência. `today` vem do navegador para não depender do fuso do servidor.
@@ -1798,9 +1801,9 @@ function evaluateChallenge(uid, ch, today) {
 
   const waterMl = {};
   let waterTarget = 0;
-  if (rules.water_ml_per_kg) {
+  if (hasWaterRule(rules)) {
     const wcfg = getWaterConfig(uid);
-    waterTarget = rules.water_target_ml || (personFor(uid).peso ? waterTargetMl(personFor(uid).peso, rules.water_ml_per_kg) : wcfg.daily_goal_ml);
+    waterTarget = rules.water_target_ml || rules.water_ml || (personFor(uid).peso ? waterTargetMl(personFor(uid).peso, rules.water_ml_per_kg) : wcfg.daily_goal_ml);
     if (hasData) {
       db.prepare('SELECT date, bottles FROM water_intake WHERE user_id = ? AND date >= ? AND date <= ?')
         .all(uid, ch.start_date, until).forEach(r => { waterMl[r.date] = Math.round(r.bottles * wcfg.bottle_size_ml); });
@@ -1828,7 +1831,7 @@ function evaluateChallenge(uid, ch, today) {
       else status = isToday ? 'pending' : 'fail';
       r.deficit = { status, target, value, kcal, gasto };
     }
-    if (rules.water_ml_per_kg) {
+    if (hasWaterRule(rules)) {
       const ml = waterMl[date] || 0;
       r.water = { status: future ? 'future' : ml >= waterTarget ? 'ok' : isToday ? 'pending' : 'fail', ml, target: waterTarget };
     }
@@ -1949,11 +1952,15 @@ app.post('/api/challenges', (req, res) => {
   }
 
   const rules = JSON.parse(JSON.stringify(tpl.rules));
-  if (rules.water_ml_per_kg) {
-    const peso = +req.body.peso > 0 ? Math.min(400, +req.body.peso) : personFor(uid).peso;
-    if (!(peso > 0)) return res.status(400).json({ error: 'Informe seu peso para calcular a meta de água' });
-    rules.water_peso_kg = peso;
-    rules.water_target_ml = waterTargetMl(peso, rules.water_ml_per_kg);
+  if (hasWaterRule(rules)) {
+    if (rules.water_ml) {
+      rules.water_target_ml = rules.water_ml;
+    } else {
+      const peso = +req.body.peso > 0 ? Math.min(400, +req.body.peso) : personFor(uid).peso;
+      if (!(peso > 0)) return res.status(400).json({ error: 'Informe seu peso para calcular a meta de água' });
+      rules.water_peso_kg = peso;
+      rules.water_target_ml = waterTargetMl(peso, rules.water_ml_per_kg);
+    }
     // A aba Água passa a mirar a mesma meta do desafio
     db.prepare('INSERT OR IGNORE INTO water_config (user_id) VALUES (?)').run(uid);
     db.prepare('UPDATE water_config SET daily_goal_ml = ? WHERE user_id = ?').run(rules.water_target_ml, uid);
