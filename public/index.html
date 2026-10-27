@@ -561,6 +561,10 @@
         </div>
       </div>
 
+      <div class="week-strip-bar">
+        <span class="week-shift-note" id="week-shift-note" hidden></span>
+        <button type="button" id="btn-shift-open" class="btn-secondary btn-sm">⇄ Remanejar semana</button>
+      </div>
       <div class="week-strip" id="week-strip"></div>
 
       <div class="day-panel">
@@ -848,6 +852,29 @@
           <button type="submit" class="btn-primary">Salvar</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Remanejar a semana do treino -->
+  <div id="modal-shift" class="modal-overlay hidden">
+    <div class="modal">
+      <h2>Remanejar esta semana</h2>
+      <p class="shift-sub" id="shift-sub"></p>
+      <div class="shift-quick">
+        <label for="shift-missed">Faltou um treino?</label>
+        <div class="shift-quick-row">
+          <select id="shift-missed"></select>
+          <button type="button" class="btn-secondary btn-sm" id="btn-shift-push">Empurrar um dia</button>
+        </div>
+        <p class="shift-hint">Passa o treino do dia escolhido para o dia seguinte, e assim por diante até cair num dia de descanso.</p>
+      </div>
+      <div class="shift-days" id="shift-days"></div>
+      <div class="form-actions shift-actions">
+        <button type="button" id="btn-shift-reset" class="btn-secondary">Voltar ao plano</button>
+        <span class="shift-spacer"></span>
+        <button type="button" id="btn-shift-cancel" class="btn-secondary">Cancelar</button>
+        <button type="button" id="btn-shift-save" class="btn-primary">Salvar</button>
+      </div>
     </div>
   </div>
 

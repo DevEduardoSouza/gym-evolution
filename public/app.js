@@ -2119,7 +2119,152 @@ function dayComplete(weekday, date) {
   return items.length > 0 && items.every(p => isDone(p.id, date));
 }
 
+// ---- Remanejar a semana (modal na aba Treino) ----
+// Rascunho do map { diaExibido: diaDoPlano | null } editado no modal; só vai pro servidor ao salvar.
+let shiftDraft = {};
+const modalShift = document.getElementById('modal-shift');
+
+function planDayHasItems(planWd) {
+  return planWd != null && cicloPlan.some(p => p.weekday === planWd);
+}
+
+function draftWeekday(wd) {
+  return Object.prototype.hasOwnProperty.call(shiftDraft, wd) ? shiftDraft[wd] : wd;
+}
+
+function planDayLabel(planWd) {
+  const muscles = [...new Set(cicloPlan.filter(p => p.weekday === planWd).map(p => p.muscle))];
+  return `Treino de ${WEEKDAY_NAMES[planWd].toLowerCase()}${muscles.length ? ' — ' + muscles.join(' + ') : ''}`;
+}
+
+function renderShiftModal() {
+  const dates = weekDates();
+  const today = todayStr();
+  document.getElementById('shift-sub').textContent =
+    `Semana de ${shortDM(dates[0])} a ${shortDM(dates[6])}. Vale só para esta semana; o plano fixo não muda.`;
+
+  // "Faltou um treino?": dias até hoje que têm treino no rascunho
+  const missed = document.getElementById('shift-missed');
+  const prevSel = missed.value;
+  missed.innerHTML = '';
+  for (let wd = 0; wd < 7 && dates[wd] <= today; wd++) {
+    const pwd = draftWeekday(wd);
+    if (!planDayHasItems(pwd)) continue;
+    const o = document.createElement('option');
+    o.value = wd;
+    o.textContent = pwd === wd
+      ? `${WEEKDAY_NAMES[wd]} — ${planDayLabel(pwd).split(' — ')[1] || 'treino'}`
+      : `${WEEKDAY_NAMES[wd]} — ${planDayLabel(pwd).toLowerCase()}`;
+    missed.appendChild(o);
+  }
+  const yesterdayWd = (new Date().getDay() + 5) % 7;
+  if ([...missed.options].some(o => o.value === prevSel)) missed.value = prevSel;
+  else if ([...missed.options].some(o => +o.value === yesterdayWd)) missed.value = String(yesterdayWd);
+  document.getElementById('btn-shift-push').disabled = !missed.options.length;
+  missed.disabled = !missed.options.length;
+
+  // Um seletor por dia
+  const planDays = [0, 1, 2, 3, 4, 5, 6].filter(planDayHasItems);
+  const list = document.getElementById('shift-days');
+  list.innerHTML = '';
+  for (let wd = 0; wd < 7; wd++) {
+    const pwd = draftWeekday(wd);
+    const row = document.createElement('label');
+    row.className = 'shift-row' + (pwd !== wd && (planDayHasItems(pwd) || planDayHasItems(wd)) ? ' changed' : '');
+    row.innerHTML = '<span class="shift-day"><b></b><small></small></span><select></select>';
+    row.querySelector('b').textContent = WEEKDAY_NAMES[wd];
+    row.querySelector('small').textContent = shortDM(dates[wd]) + (dates[wd] === today ? ' · hoje' : '');
+    const sel = row.querySelector('select');
+    const opt = (value, text) => {
+      const o = document.createElement('option');
+      o.value = value;
+      o.textContent = text;
+      sel.appendChild(o);
+    };
+    opt('rest', 'Descanso');
+    planDays.forEach(d => opt(d, planDayLabel(d)));
+    sel.value = planDayHasItems(pwd) ? String(pwd) : 'rest';
+    sel.addEventListener('change', () => {
+      shiftDraft[wd] = sel.value === 'rest' ? null : +sel.value;
+      renderShiftModal();
+    });
+    list.appendChild(row);
+  }
+}
+
+// Faltou o treino do dia `from`: ele vira descanso e cada treino anda um dia,
+// até cair num dia que era descanso (que absorve a fila).
+function pushShiftFrom(from) {
+  let carry = draftWeekday(from);
+  shiftDraft[from] = null;
+  for (let wd = from + 1; wd < 7; wd++) {
+    const cur = draftWeekday(wd);
+    shiftDraft[wd] = carry;
+    if (!planDayHasItems(cur)) return null;
+    carry = cur;
+  }
+  return carry; // não coube na semana
+}
+
+// Map limpo para o servidor: só o que difere do plano
+function cleanShift(map) {
+  const out = {};
+  for (let wd = 0; wd < 7; wd++) {
+    if (!Object.prototype.hasOwnProperty.call(map, wd)) continue;
+    const v = map[wd];
+    const same = v === wd || (v == null && !planDayHasItems(wd));
+    if (!same) out[wd] = v;
+  }
+  return out;
+}
+
+async function saveShift(map) {
+  const res = await api('PUT', '/api/plan/shift', { week_start: weekDates()[0], map: cleanShift(map) });
+  if (res.error) {
+    toastMsg(res.error);
+    return false;
+  }
+  await loadCicloData();
+  return true;
+}
+
+function renderShiftNote() {
+  const note = document.getElementById('week-shift-note');
+  const changed = Object.keys(cleanShift(planShift)).length > 0;
+  note.hidden = !changed;
+  note.textContent = changed ? 'Semana remanejada' : '';
+}
+
+document.getElementById('btn-shift-open').addEventListener('click', () => {
+  shiftDraft = { ...planShift };
+  renderShiftModal();
+  modalShift.classList.remove('hidden');
+});
+document.getElementById('btn-shift-push').addEventListener('click', () => {
+  const from = +document.getElementById('shift-missed').value;
+  const lost = pushShiftFrom(from);
+  renderShiftModal();
+  toastMsg(lost != null
+    ? `Sem dia livre até domingo: o treino de ${WEEKDAY_NAMES[lost].toLowerCase()} fica de fora`
+    : 'Treinos empurrados um dia. Confira e salve.');
+});
+document.getElementById('btn-shift-cancel').addEventListener('click', () => modalShift.classList.add('hidden'));
+document.getElementById('btn-shift-reset').addEventListener('click', async () => {
+  if (await saveShift({})) {
+    modalShift.classList.add('hidden');
+    toastMsg('Semana voltou ao plano normal');
+  }
+});
+document.getElementById('btn-shift-save').addEventListener('click', async () => {
+  if (await saveShift(shiftDraft)) {
+    modalShift.classList.add('hidden');
+    toastMsg('Semana remanejada! Na próxima, volta ao plano normal.');
+  }
+});
+modalShift.addEventListener('click', e => { if (e.target === modalShift) modalShift.classList.add('hidden'); });
+
 function renderCiclo() {
+  renderShiftNote();
   renderGami();
   renderWeekStrip();
   renderDay();

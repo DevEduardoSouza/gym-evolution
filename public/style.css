@@ -5778,3 +5778,37 @@ body.challenge-mode .nav-desafio:not(.active) .nav-icon { color: var(--ch-c); }
   .ea-tile-value { font-size: 1.35rem; }
 }
 .ea [hidden] { display: none !important; }
+
+/* ===== Remanejar semana (aba Treino) ===== */
+.week-strip-bar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-bottom: 8px; }
+.week-shift-note { font-size: 0.74rem; font-weight: 600; color: #c7c7cc; padding: 4px 10px; border-radius: 999px; background: #2c2c2e; }
+.week-shift-note[hidden] { display: none; }
+.shift-sub { font-size: 0.8rem; color: #a1a1a6; margin: -8px 0 16px; line-height: 1.4; }
+.shift-quick { padding: 12px 14px; border-radius: 12px; background: rgba(255, 255, 255, 0.04); border: 1px solid #3a3a3d; margin-bottom: 14px; }
+.shift-quick label { display: block; font-size: 0.85rem; font-weight: 700; color: #fff; margin-bottom: 8px; }
+.shift-quick-row { display: flex; gap: 8px; }
+.shift-quick-row select { flex: 1; min-width: 0; }
+.shift-hint { margin-top: 8px; font-size: 0.72rem; color: #8e8e93; line-height: 1.4; }
+.shift-days { display: flex; flex-direction: column; gap: 6px; margin-bottom: 18px; }
+.shift-row { display: grid; grid-template-columns: 96px 1fr; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 10px; border: 1px solid transparent; }
+.shift-row.changed { border-color: #55555a; background: rgba(255, 255, 255, 0.04); }
+.shift-day { display: flex; flex-direction: column; line-height: 1.2; }
+.shift-day b { font-size: 0.85rem; color: #fff; }
+.shift-day small { font-size: 0.7rem; color: #8e8e93; }
+#modal-shift select {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid #48484c;
+  background: #1c1c1e;
+  color: #e0e0e0;
+  font: inherit;
+  font-size: 0.82rem;
+}
+.shift-actions { align-items: center; flex-wrap: wrap; }
+.shift-spacer { flex: 1; }
+@media (max-width: 600px) {
+  .shift-row { grid-template-columns: 74px 1fr; }
+  .shift-quick-row { flex-direction: column; }
+}
