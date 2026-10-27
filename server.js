@@ -836,16 +836,18 @@ function effortVsLoads(uid, effortByDate) {
   const ready = [];
   const tired = [];
   const progressing = [];
+  let compared = 0;
   Object.entries(byEx).forEach(([exercise, s]) => {
     if (s.length < 2) return;
+    compared++;
     const prev = s[s.length - 2];
     const last = s[s.length - 1];
     const item = { exercise, top: last.top, prevTop: prev.top, effort: last.effort, prevEffort: prev.effort, date: last.date };
     if (last.top > prev.top) progressing.push(item);
-    else if (last.top === prev.top && (last.effort <= prev.effort - 1 || last.effort <= 6)) ready.push(item);
+    else if (last.top === prev.top && last.effort <= 7 && (last.effort <= prev.effort - 1 || last.effort <= 6)) ready.push(item);
     else if (last.top <= prev.top && last.effort >= prev.effort + 1.5) tired.push(item);
   });
-  return { ready, tired, progressing };
+  return { ready, tired, progressing, compared };
 }
 
 // Déficit dos 3 dias anteriores ao treino (o que chega de energia no treino) × esforço.
@@ -940,7 +942,7 @@ function effortAnalysis(uid) {
     insights.push({ status: 'warning', title: 'Semana mais leve que o normal', text: `Carga em ${ratio.toFixed(2).replace('.', ',')}× a sua média. Se não foi de propósito (descanso), retome aos poucos.` });
   }
 
-  const stalled = loads.progressing.length === 0 && (loads.ready.length + loads.tired.length) > 0;
+  const stalled = loads.compared > 0 && loads.progressing.length === 0;
   if (last14.length >= 4 && avg14 >= 8.5) {
     insights.push({
       status: 'serious',
@@ -952,6 +954,7 @@ function effortAnalysis(uid) {
   }
 
   const fmtW = (w) => `${String(w).replace('.', ',')} kg`;
+  const fmtBal = (d) => d >= 0 ? `déficit médio de ${d} kcal` : `superávit médio de ${-d} kcal`;
   if (loads.tired.length) {
     insights.push({ status: 'warning', title: 'Sinais de fadiga', text: loads.tired.slice(0, 3).map(t => `${t.exercise}: mesma carga (${fmtW(t.top)}) com esforço ${t.prevEffort} → ${t.effort}`).join(' · ') });
   }
@@ -960,9 +963,9 @@ function effortAnalysis(uid) {
   }
 
   if (diet && diet.enough && diet.effortHigh - diet.effortLow >= 1) {
-    insights.push({ status: 'warning', title: 'O déficit está pesando no treino', text: `Depois de dias com déficit médio de ${diet.highDeficit} kcal, seu esforço foi ${String(diet.effortHigh).replace('.', ',')}; com ${diet.lowDeficit} kcal, ${String(diet.effortLow).replace('.', ',')}. Comer mais carboidrato antes dos treinos pesados pode ajudar.` });
+    insights.push({ status: 'warning', title: 'O déficit está pesando no treino', text: `Depois de dias com ${fmtBal(diet.highDeficit)}, seu esforço médio foi ${String(diet.effortHigh).replace('.', ',')}; depois de dias com ${fmtBal(diet.lowDeficit)}, ${String(diet.effortLow).replace('.', ',')}. Comer mais carboidrato antes dos treinos pesados pode ajudar.` });
   } else if (diet && diet.enough) {
-    insights.push({ status: 'good', title: 'Déficit sem afetar o treino', text: `Seu esforço ficou parecido com déficit alto (${diet.highDeficit} kcal → ${String(diet.effortHigh).replace('.', ',')}) ou baixo (${diet.lowDeficit} kcal → ${String(diet.effortLow).replace('.', ',')}).` });
+    insights.push({ status: 'good', title: 'Déficit sem afetar o treino', text: `Seu esforço ficou parecido depois de dias com ${fmtBal(diet.highDeficit)} (${String(diet.effortHigh).replace('.', ',')}) e com ${fmtBal(diet.lowDeficit)} (${String(diet.effortLow).replace('.', ',')}).` });
   }
 
   return {

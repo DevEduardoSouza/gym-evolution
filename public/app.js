@@ -1479,16 +1479,18 @@ const ICON_DUMBBELL = ICONS.dumbbell;
 const ICON_RUN = ICONS.run;
 
 async function loadTreinoData() {
-  const [data, stats, efforts] = await Promise.all([
+  const [data, stats, efforts, analysis] = await Promise.all([
     api('GET', `/api/treino?year=${treinoYear}`),
     api('GET', '/api/treino/stats'),
     api('GET', `/api/esforco?start=${treinoYear}-01-01&end=${treinoYear}-12-31`),
+    api('GET', '/api/esforco/analise'),
   ]);
   treinoData = data;
   treinoStats = stats;
   treinoEffort = {};
   efforts.forEach(e => { treinoEffort[e.date] = e.effort; });
   renderTreinoUI();
+  renderEffortAnalysis(analysis);
 }
 
 function renderTreinoUI() {
@@ -1797,6 +1799,218 @@ function effortPicker(date, current, onSaved) {
   paint();
   return wrap;
 }
+
+// ---- Análise do esforço (aba Frequência) ----
+const EA_STATUS = {
+  good: { icon: '✓', label: 'Bom sinal' },
+  warning: { icon: '!', label: 'Atenção' },
+  serious: { icon: '!!', label: 'Cuidado' },
+  critical: { icon: '⚠', label: 'Alerta' },
+};
+const fmtDec = (n, d = 1) => (+n).toFixed(d).replace(/\.0+$/, '').replace('.', ',');
+const fmtInt = (n) => Math.round(n || 0).toLocaleString('pt-BR');
+const shortDM = (iso) => `${+iso.slice(8)}/${+iso.slice(5, 7)}`;
+
+function eaInsightEl(i) {
+  const st = EA_STATUS[i.status] || EA_STATUS.warning;
+  const el = document.createElement('div');
+  el.className = `ea-insight st-${i.status}`;
+  el.innerHTML = '<span class="ea-st"><i></i><b></b></span><div><strong></strong><p></p></div>';
+  el.querySelector('i').textContent = st.icon;
+  el.querySelector('b').textContent = st.label;
+  el.querySelector('strong').textContent = i.title;
+  el.querySelector('p').textContent = i.text;
+  return el;
+}
+
+// Gráfico SVG de uma série semanal. kind 'col' (colunas) ou 'line' (linha com pontos).
+// Um eixo só; tooltip por semana (hover/foco); a tabela abaixo tem todos os valores.
+function eaChart(el, weeks, { kind, value, yMax, ticks, fmt, ref }) {
+  el.innerHTML = '';
+  const W = Math.max(280, el.clientWidth || 320);
+  const H = 170;
+  const m = { t: 18, r: 8, b: 24, l: 34 };
+  const iw = W - m.l - m.r;
+  const ih = H - m.t - m.b;
+  const n = weeks.length;
+  const band = iw / n;
+  const x = (i) => m.l + band * i + band / 2;
+  const y = (v) => m.t + ih - (v / yMax) * ih;
+  const lastIdx = n - 1;
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('width', W);
+  svg.setAttribute('height', H);
+  svg.setAttribute('role', 'img');
+  const mk = (tag, attrs, parent = svg) => {
+    const e = document.createElementNS(ns, tag);
+    Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v));
+    parent.appendChild(e);
+    return e;
+  };
+
+  ticks.forEach(t => {
+    mk('line', { x1: m.l, x2: W - m.r, y1: y(t), y2: y(t), class: 'ea-grid' });
+    mk('text', { x: m.l - 6, y: y(t) + 3.5, class: 'ea-axis', 'text-anchor': 'end' }).textContent = fmt(t);
+  });
+  if (ref) {
+    mk('line', { x1: m.l, x2: W - m.r, y1: y(ref.value), y2: y(ref.value), class: 'ea-ref' });
+    mk('text', { x: m.l + 4, y: y(ref.value) - 4, class: 'ea-axis', 'text-anchor': 'start' }).textContent = ref.label;
+  }
+  const every = n > 8 && W < 520 ? 3 : 2;
+  weeks.forEach((w, i) => {
+    if ((lastIdx - i) % every === 0) {
+      mk('text', { x: x(i), y: H - 6, class: 'ea-axis', 'text-anchor': 'middle' }).textContent = shortDM(w.start);
+    }
+  });
+
+  if (kind === 'col') {
+    const bw = Math.min(24, band - 4);
+    weeks.forEach((w, i) => {
+      const v = value(w);
+      if (!(v > 0)) return;
+      const h = Math.max(2, y(0) - y(v));
+      const x0 = x(i) - bw / 2;
+      const y0 = y(0) - h;
+      const r = Math.min(4, h, bw / 2);
+      mk('path', {
+        d: `M${x0},${y(0)} V${y0 + r} Q${x0},${y0} ${x0 + r},${y0} H${x0 + bw - r} Q${x0 + bw},${y0} ${x0 + bw},${y0 + r} V${y(0)} Z`,
+        class: 'ea-col' + (i === lastIdx ? ' cur' : ''),
+        'data-i': i,
+      });
+    });
+  } else {
+    let d = '';
+    let pen = false;
+    weeks.forEach((w, i) => {
+      const v = value(w);
+      if (v == null) { pen = false; return; }
+      d += `${pen ? 'L' : 'M'}${x(i)},${y(v)} `;
+      pen = true;
+    });
+    if (d) mk('path', { d, class: 'ea-line' });
+    weeks.forEach((w, i) => {
+      const v = value(w);
+      if (v == null) return;
+      mk('circle', { cx: x(i), cy: y(v), r: 4, class: 'ea-dot' + (i === lastIdx ? ' cur' : ''), 'data-i': i });
+    });
+  }
+
+  // Rótulo só no valor da semana atual (ou da última com dado)
+  let li = lastIdx;
+  while (li >= 0 && !(value(weeks[li]) > 0)) li--;
+  if (li >= 0) {
+    mk('text', { x: x(li), y: y(value(weeks[li])) - 8, class: 'ea-val', 'text-anchor': 'middle' }).textContent = fmt(value(weeks[li]));
+  }
+
+  // Alvo de hover/foco: a faixa inteira de cada semana (não só a marca)
+  const tip = document.createElement('div');
+  tip.className = 'ea-tip';
+  tip.hidden = true;
+  const hl = mk('line', { x1: 0, x2: 0, y1: m.t, y2: y(0), class: 'ea-cross', visibility: 'hidden' });
+  const show = (i) => {
+    const w = weeks[i];
+    tip.innerHTML = '<b></b><span></span><small></small>';
+    tip.querySelector('b').textContent = kind === 'col' ? `${fmtInt(w.load)} UA` : (w.avgEffort != null ? `Esforço ${fmtDec(w.avgEffort)}` : 'Sem marcações');
+    tip.querySelector('span').textContent = `Semana de ${shortDM(w.start)} a ${shortDM(w.end)}`;
+    tip.querySelector('small').textContent = `${w.sessions} ${w.sessions === 1 ? 'treino' : 'treinos'} · ${fmtInt(w.minutes)} min`;
+    tip.hidden = false;
+    const left = Math.min(Math.max(x(i) / W * el.clientWidth, 70), el.clientWidth - 70);
+    tip.style.left = left + 'px';
+    hl.setAttribute('x1', x(i));
+    hl.setAttribute('x2', x(i));
+    hl.setAttribute('visibility', 'visible');
+    svg.querySelectorAll('[data-i]').forEach(e => e.classList.toggle('hover', +e.dataset.i === i));
+  };
+  const hide = () => {
+    tip.hidden = true;
+    hl.setAttribute('visibility', 'hidden');
+    svg.querySelectorAll('.hover').forEach(e => e.classList.remove('hover'));
+  };
+  weeks.forEach((w, i) => {
+    const hit = mk('rect', { x: m.l + band * i, y: m.t, width: band, height: ih, class: 'ea-hit', tabindex: 0 });
+    hit.setAttribute('aria-label', `Semana de ${shortDM(w.start)}: ${kind === 'col' ? fmtInt(w.load) + ' UA' : (w.avgEffort != null ? 'esforço ' + fmtDec(w.avgEffort) : 'sem marcações')}`);
+    hit.addEventListener('pointerenter', () => show(i));
+    hit.addEventListener('focus', () => show(i));
+    hit.addEventListener('pointerleave', hide);
+    hit.addEventListener('blur', hide);
+  });
+  el.appendChild(svg);
+  el.appendChild(tip);
+}
+
+let eaData = null;
+
+function renderEffortAnalysis(a) {
+  eaData = a;
+  const has = a.weeks.some(w => w.sessions > 0);
+  document.getElementById('ea-empty').hidden = has;
+  document.getElementById('ea-body').hidden = !has;
+  if (!has) return;
+
+  document.getElementById('ea-acute').textContent = fmtInt(a.acute);
+  document.getElementById('ea-chronic').textContent = fmtInt(a.chronic);
+  const ratioEl = document.getElementById('ea-ratio');
+  const ratioSub = document.getElementById('ea-ratio-sub');
+  ratioSub.innerHTML = '';
+  if (a.ratio != null) {
+    ratioEl.textContent = fmtDec(a.ratio, 2);
+    const st = EA_STATUS[a.zone.status];
+    const chip = document.createElement('span');
+    chip.className = `ea-st st-${a.zone.status}`;
+    chip.innerHTML = '<i></i><b></b>';
+    chip.querySelector('i').textContent = st.icon;
+    chip.querySelector('b').textContent = a.zone.label;
+    ratioSub.appendChild(chip);
+  } else {
+    ratioEl.textContent = '—';
+    ratioSub.textContent = 'precisa de 3 semanas de marcações';
+  }
+  document.getElementById('ea-avg14').textContent = a.avg14 != null ? fmtDec(a.avg14) : '—';
+  const d = a.avg14 != null && a.avgPrev14 != null ? a.avg14 - a.avgPrev14 : null;
+  document.getElementById('ea-avg14-sub').textContent = d == null
+    ? `${a.sessions14} ${a.sessions14 === 1 ? 'treino' : 'treinos'}`
+    : `${d > 0 ? '+' : d < 0 ? '−' : '±'}${fmtDec(Math.abs(d))} vs 2 semanas antes`;
+
+  const ins = document.getElementById('ea-insights');
+  ins.innerHTML = '';
+  a.insights.forEach(i => ins.appendChild(eaInsightEl(i)));
+
+  const maxLoad = Math.max(...a.weeks.map(w => w.load), 1);
+  const step = maxLoad > 4000 ? 2000 : maxLoad > 2000 ? 1000 : maxLoad > 800 ? 500 : maxLoad > 400 ? 200 : 100;
+  const yMax = Math.ceil(maxLoad * 1.1 / step) * step;
+  const loadTicks = [];
+  for (let t = 0; t <= yMax; t += step) loadTicks.push(t);
+  eaChart(document.getElementById('ea-chart-load'), a.weeks, {
+    kind: 'col', value: w => w.load, yMax, ticks: loadTicks.length > 5 ? loadTicks.filter((_, i) => i % 2 === 0) : loadTicks, fmt: fmtInt,
+  });
+  eaChart(document.getElementById('ea-chart-effort'), a.weeks, {
+    kind: 'line', value: w => w.avgEffort, yMax: 10, ticks: [0, 5, 10], fmt: v => fmtDec(v),
+    ref: { value: 8.5, label: '8,5 · descarga' },
+  });
+
+  const tb = document.getElementById('ea-table-body');
+  tb.innerHTML = '';
+  [...a.weeks].reverse().forEach(w => {
+    const tr = document.createElement('tr');
+    [`${shortDM(w.start)} – ${shortDM(w.end)}`, w.sessions, fmtInt(w.minutes), w.avgEffort != null ? fmtDec(w.avgEffort) : '—', fmtInt(w.load)]
+      .forEach(v => { const td = document.createElement('td'); td.textContent = v; tr.appendChild(td); });
+    tb.appendChild(tr);
+  });
+  document.getElementById('ea-note').textContent = a.estimatedDays
+    ? `${a.estimatedDays} ${a.estimatedDays === 1 ? 'dia marcado não tinha' : 'dias marcados não tinham'} exercícios registrados; usei 45 min de duração.`
+    : '';
+}
+
+// Redesenha os gráficos quando a largura muda (sidebar/rotação)
+let eaResizeT;
+window.addEventListener('resize', () => {
+  clearTimeout(eaResizeT);
+  eaResizeT = setTimeout(() => {
+    if (eaData && document.getElementById('tab-treino').classList.contains('active')) renderEffortAnalysis(eaData);
+  }, 150);
+});
 
 let cicloPlan = [];
 let cicloLogs = [];
@@ -2873,6 +3087,7 @@ async function loadHojeData() {
     api('GET', '/api/plan/shift'),
   ]);
   planShift = shift.map || {};
+  api('GET', '/api/esforco/analise').then(renderHojeEffortAlert).catch(() => {});
   renderHoje(plan, logs, gami, tstats, wcfg, wint, ranking, kcal, effort[0] ? effort[0].effort : 0);
   refreshChallenge();
 }
@@ -2966,6 +3181,22 @@ function renderHoje(plan, logs, gami, tstats, wcfg, wint, ranking, kcal, effort)
 
   renderRanking(ranking);
 }
+
+// Aviso de carga/descarga no card do treino: só os sinais que pedem ação
+function renderHojeEffortAlert(a) {
+  const el = document.getElementById('hoje-ea-alert');
+  const top = (a.insights || []).find(i => i.status === 'critical' || i.status === 'serious');
+  el.hidden = !top;
+  if (!top) return;
+  el.className = `ea-alert st-${top.status}`;
+  el.innerHTML = '<span class="ea-st"><i></i></span><span><strong></strong> <small>Ver análise ›</small></span>';
+  el.querySelector('i').textContent = EA_STATUS[top.status].icon;
+  el.querySelector('strong').textContent = top.title;
+}
+document.getElementById('hoje-ea-alert').addEventListener('click', () => {
+  document.querySelector('.nav-btn[data-tab="treino"]').click();
+  setTimeout(() => document.getElementById('effort-analysis').scrollIntoView({ behavior: 'smooth', block: 'start' }), 350);
+});
 
 document.getElementById('btn-hoje-garrafa').addEventListener('click', async e => {
   const bottles = (parseFloat(e.currentTarget.dataset.bottles) || 0) + 1;
