@@ -396,7 +396,14 @@ app.get('/api/treino/stats', (req, res) => {
     if (streak > bestStreak) bestStreak = streak;
   }
 
-  res.json({ currentStreak, bestStreak, totalDays, totalMusc, totalCorrida, avgRating });
+  // Esforço médio dos últimos 30 dias (só dias marcados)
+  const since = new Date(today);
+  since.setDate(since.getDate() - 29);
+  const eff = db.prepare('SELECT AVG(effort) avg, COUNT(*) n FROM workout_effort WHERE user_id = ? AND date >= ?')
+    .get(req.session.userId, since.toLocaleDateString('en-CA'));
+  const avgEffort30 = eff.n ? +eff.avg.toFixed(1) : null;
+
+  res.json({ currentStreak, bestStreak, totalDays, totalMusc, totalCorrida, avgRating, avgEffort30, effortDays30: eff.n });
 });
 
 // Treino - list by year
@@ -648,6 +655,38 @@ app.get('/api/plan', (req, res) => {
   res.json(rows);
 });
 
+// Remanejamento da semana (padrão: semana atual). Resposta: { week_start, map } — map vazio = plano normal.
+app.get('/api/plan/shift', (req, res) => {
+  const ref = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || '')) ? req.query.date : new Date().toLocaleDateString('en-CA');
+  const week_start = mondayOf(ref);
+  res.json({ week_start, map: planShifts(req.session.userId)[week_start] || {} });
+});
+
+// Body: { week_start, map } — map vazio apaga o remanejamento da semana
+app.put('/api/plan/shift', (req, res) => {
+  const { week_start, map } = req.body || {};
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(week_start || '')) || mondayOf(week_start) !== week_start) {
+    return res.status(400).json({ error: 'week_start deve ser uma segunda-feira (YYYY-MM-DD)' });
+  }
+  const clean = {};
+  for (const [k, v] of Object.entries(map || {})) {
+    const d = +k;
+    if (!Number.isInteger(d) || d < 0 || d > 6) return res.status(400).json({ error: 'Dia inválido no remanejamento' });
+    if (v !== null && !(Number.isInteger(v) && v >= 0 && v <= 6)) return res.status(400).json({ error: 'Dia do plano inválido' });
+    if (v !== d) clean[d] = v;
+  }
+  const uid = req.session.userId;
+  if (!Object.keys(clean).length) {
+    db.prepare('DELETE FROM plan_week_shift WHERE user_id = ? AND week_start = ?').run(uid, week_start);
+  } else {
+    db.prepare(`
+      INSERT INTO plan_week_shift (user_id, week_start, map) VALUES (?, ?, ?)
+      ON CONFLICT(user_id, week_start) DO UPDATE SET map = excluded.map
+    `).run(uid, week_start, JSON.stringify(clean));
+  }
+  res.json({ week_start, map: clean });
+});
+
 app.post('/api/plan', (req, res) => {
   const { weekday, exercise_id, scheme } = req.body;
   const wd = parseInt(weekday);
@@ -725,6 +764,227 @@ app.post('/api/workout-log/toggle', (req, res) => {
     .run(req.session.userId, date, plan_item_id);
   emitProgressNotifs(req.session.userId, before);
   res.json({ done: true });
+});
+
+// Esforço percebido do treino (RPE 1–10), um por dia
+app.get('/api/esforco', (req, res) => {
+  const { start, end } = req.query;
+  const rows = start && end
+    ? db.prepare('SELECT date, effort FROM workout_effort WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date')
+      .all(req.session.userId, start, end)
+    : db.prepare('SELECT date, effort FROM workout_effort WHERE user_id = ? ORDER BY date').all(req.session.userId);
+  res.json(rows);
+});
+
+// effort vazio/0 apaga a marcação do dia
+app.post('/api/esforco', (req, res) => {
+  const { date } = req.body;
+  const effort = Math.round(+req.body.effort || 0);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) return res.status(400).json({ error: 'Data inválida' });
+  if (effort < 0 || effort > 10) return res.status(400).json({ error: 'Esforço deve ser de 1 a 10' });
+  if (date > new Date().toLocaleDateString('en-CA')) return res.status(400).json({ error: 'Não dá para marcar esforço de um dia futuro' });
+  if (!effort) {
+    db.prepare('DELETE FROM workout_effort WHERE user_id = ? AND date = ?').run(req.session.userId, date);
+    return res.json({ date, effort: null });
+  }
+  db.prepare(`
+    INSERT INTO workout_effort (user_id, date, effort) VALUES (?, ?, ?)
+    ON CONFLICT(user_id, date) DO UPDATE SET effort = excluded.effort
+  `).run(req.session.userId, date, effort);
+  res.json({ date, effort });
+});
+
+// ---- Análise do esforço ----
+// Carga da sessão (método de Foster): esforço (1–10) × duração em minutos, em "UA".
+// Duração vem da mesma estimativa das calorias (séries, esquema do plano, cardio real);
+// dia marcado sem nada registrado usa EFFORT_DEFAULT_MIN.
+const EFFORT_DEFAULT_MIN = 45;
+const EFFORT_WEEKS = 12;
+const ACWR_ZONES = [ // razão carga aguda (7 dias) / crônica (média semanal de 28 dias)
+  { max: 0.8, zone: 'baixa', status: 'warning', label: 'Abaixo do habitual' },
+  { max: 1.3, zone: 'ideal', status: 'good', label: 'Faixa ideal' },
+  { max: 1.5, zone: 'alta', status: 'serious', label: 'Subiu rápido' },
+  { max: Infinity, zone: 'risco', status: 'critical', label: 'Pico de carga' },
+];
+
+function effortSessions(uid, start, end) {
+  const rows = db.prepare('SELECT date, effort FROM workout_effort WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date')
+    .all(uid, start, end);
+  return rows.map(r => {
+    const est = computeCalories(uid, r.date).minutes;
+    const minutes = est > 0 ? est : EFFORT_DEFAULT_MIN;
+    return { date: r.date, effort: r.effort, minutes, estimated: !(est > 0), load: Math.round(r.effort * minutes) };
+  });
+}
+
+const avgOf = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+const round1 = (n) => n == null ? null : Math.round(n * 10) / 10;
+
+// Por exercício: as duas últimas sessões com esforço marcado. Mesma carga com esforço
+// caindo = pronto para subir; mesma carga (ou menos) com esforço subindo = fadiga.
+function effortVsLoads(uid, effortByDate) {
+  const rows = db.prepare(`
+    SELECT exercise, date, MAX(weight) AS top FROM progressao_carga
+    WHERE user_id = ? AND weight > 0 AND date >= ?
+    GROUP BY exercise, date ORDER BY exercise, date
+  `).all(uid, addDaysStr(new Date().toLocaleDateString('en-CA'), -60));
+  const byEx = {};
+  rows.forEach(r => {
+    if (effortByDate[r.date] == null) return;
+    (byEx[r.exercise] = byEx[r.exercise] || []).push({ date: r.date, top: r.top, effort: effortByDate[r.date] });
+  });
+  const ready = [];
+  const tired = [];
+  const progressing = [];
+  Object.entries(byEx).forEach(([exercise, s]) => {
+    if (s.length < 2) return;
+    const prev = s[s.length - 2];
+    const last = s[s.length - 1];
+    const item = { exercise, top: last.top, prevTop: prev.top, effort: last.effort, prevEffort: prev.effort, date: last.date };
+    if (last.top > prev.top) progressing.push(item);
+    else if (last.top === prev.top && (last.effort <= prev.effort - 1 || last.effort <= 6)) ready.push(item);
+    else if (last.top <= prev.top && last.effort >= prev.effort + 1.5) tired.push(item);
+  });
+  return { ready, tired, progressing };
+}
+
+// Déficit dos 3 dias anteriores ao treino (o que chega de energia no treino) × esforço.
+function effortVsDiet(uid, sessions) {
+  if (sessions.length < 6) return null;
+  const first = addDaysStr(sessions[0].date, -3);
+  const last = sessions[sessions.length - 1].date;
+  const kcalByDate = {};
+  db.prepare(`
+    SELECT m.date, SUM(COALESCE(f.kcal, m.kcal, 0) * m.grams / 100) AS kcal
+    FROM meal_log m LEFT JOIN food_library f ON f.id = m.food_id
+    WHERE m.user_id = ? AND m.date >= ? AND m.date <= ?
+    GROUP BY m.date
+  `).all(uid, first, last).forEach(r => { if (r.kcal > 0) kcalByDate[r.date] = r.kcal; });
+  const burn = caloriesRange(uid, first, last);
+  const rotina = burn.basal * CHALLENGE_ACTIVITY_FACTOR;
+  const treinoKcal = {};
+  burn.days.forEach(d => { treinoKcal[d.date] = d.kcal; });
+
+  const points = [];
+  sessions.forEach(s => {
+    const defs = [1, 2, 3].map(n => addDaysStr(s.date, -n))
+      .filter(d => kcalByDate[d] != null)
+      .map(d => rotina + (treinoKcal[d] || 0) - kcalByDate[d]);
+    if (defs.length >= 2) points.push({ date: s.date, effort: s.effort, deficit: Math.round(avgOf(defs)) });
+  });
+  if (points.length < 6) return { points: points.length, enough: false };
+
+  // Divide pela mediana do déficit: metade mais "apertada" × metade mais folgada
+  const sorted = [...points].sort((a, b) => a.deficit - b.deficit);
+  const mid = Math.floor(sorted.length / 2);
+  const low = sorted.slice(0, mid);
+  const high = sorted.slice(sorted.length - mid);
+  return {
+    enough: true,
+    points: points.length,
+    highDeficit: Math.round(avgOf(high.map(p => p.deficit))),
+    lowDeficit: Math.round(avgOf(low.map(p => p.deficit))),
+    effortHigh: round1(avgOf(high.map(p => p.effort))),
+    effortLow: round1(avgOf(low.map(p => p.effort))),
+  };
+}
+
+function effortAnalysis(uid) {
+  const today = new Date().toLocaleDateString('en-CA');
+  const firstMonday = addDaysStr(mondayOf(today), -7 * (EFFORT_WEEKS - 1));
+  const start = firstMonday < addDaysStr(today, -27) ? firstMonday : addDaysStr(today, -27);
+  const sessions = effortSessions(uid, start, today);
+  const effortByDate = {};
+  sessions.forEach(s => { effortByDate[s.date] = s.effort; });
+  const sumLoad = (from, to) => sessions.filter(s => s.date >= from && s.date <= to).reduce((a, s) => a + s.load, 0);
+
+  // 6) Série semanal para o gráfico
+  const weeks = [];
+  for (let i = 0; i < EFFORT_WEEKS; i++) {
+    const ws = addDaysStr(firstMonday, i * 7);
+    const we = addDaysStr(ws, 6);
+    const inWeek = sessions.filter(s => s.date >= ws && s.date <= we);
+    weeks.push({
+      start: ws,
+      end: we,
+      sessions: inWeek.length,
+      load: inWeek.reduce((a, s) => a + s.load, 0),
+      avgEffort: round1(avgOf(inWeek.map(s => s.effort))),
+      minutes: inWeek.reduce((a, s) => a + s.minutes, 0),
+    });
+  }
+
+  // 1 + 2) Carga aguda × crônica. Só vale com pelo menos 3 semanas de histórico.
+  const acute = sumLoad(addDaysStr(today, -6), today);
+  const chronic = Math.round(sumLoad(addDaysStr(today, -27), today) / 4);
+  const firstSession = sessions.length ? sessions[0].date : null;
+  const historyOk = !!firstSession && firstSession <= addDaysStr(today, -21) && chronic > 0;
+  const ratio = historyOk ? Math.round((acute / chronic) * 100) / 100 : null;
+  const zone = ratio == null ? null : ACWR_ZONES.find(z => ratio < z.max);
+
+  // 3) Esforço das 2 últimas semanas × as 2 anteriores
+  const last14 = sessions.filter(s => s.date >= addDaysStr(today, -13));
+  const prev14 = sessions.filter(s => s.date >= addDaysStr(today, -27) && s.date < addDaysStr(today, -13));
+  const avg14 = round1(avgOf(last14.map(s => s.effort)));
+  const avgPrev14 = round1(avgOf(prev14.map(s => s.effort)));
+
+  const loads = effortVsLoads(uid, effortByDate);
+  const diet = effortVsDiet(uid, sessions.filter(s => s.date >= addDaysStr(today, -59)));
+
+  const insights = [];
+  if (zone && zone.zone === 'risco') {
+    insights.push({ status: 'critical', title: 'Pico de carga', text: `Sua carga dos últimos 7 dias (${acute} UA) está ${ratio.toFixed(2).replace('.', ',')}× a média das últimas 4 semanas (${chronic} UA). Saltos acima de 1,5× aumentam o risco de lesão — segure o volume nesta semana.` });
+  } else if (zone && zone.zone === 'alta') {
+    insights.push({ status: 'serious', title: 'Carga subiu rápido', text: `Últimos 7 dias em ${ratio.toFixed(2).replace('.', ',')}× a média de 4 semanas. Ainda dá, mas evite aumentar mais até o corpo acompanhar.` });
+  } else if (zone && zone.zone === 'baixa' && acute > 0) {
+    insights.push({ status: 'warning', title: 'Semana mais leve que o normal', text: `Carga em ${ratio.toFixed(2).replace('.', ',')}× a sua média. Se não foi de propósito (descanso), retome aos poucos.` });
+  }
+
+  const stalled = loads.progressing.length === 0 && (loads.ready.length + loads.tired.length) > 0;
+  if (last14.length >= 4 && avg14 >= 8.5) {
+    insights.push({
+      status: 'serious',
+      title: 'Hora de uma semana de descarga',
+      text: `Esforço médio de ${String(avg14).replace('.', ',')} nas últimas 2 semanas${stalled ? ' e as cargas pararam de subir' : ''}. Uma semana com ~40% menos séries (mesmas cargas) costuma devolver o rendimento.`,
+    });
+  } else if (avg14 != null && avgPrev14 != null && avg14 - avgPrev14 >= 1 && stalled) {
+    insights.push({ status: 'warning', title: 'Esforço subindo sem progresso', text: `O esforço médio foi de ${String(avgPrev14).replace('.', ',')} para ${String(avg14).replace('.', ',')} sem aumento de carga. Pode ser cansaço acumulado: capriche no sono e na comida.` });
+  }
+
+  const fmtW = (w) => `${String(w).replace('.', ',')} kg`;
+  if (loads.tired.length) {
+    insights.push({ status: 'warning', title: 'Sinais de fadiga', text: loads.tired.slice(0, 3).map(t => `${t.exercise}: mesma carga (${fmtW(t.top)}) com esforço ${t.prevEffort} → ${t.effort}`).join(' · ') });
+  }
+  if (loads.ready.length) {
+    insights.push({ status: 'good', title: 'Pronto para subir a carga', text: loads.ready.slice(0, 3).map(t => `${t.exercise} (${fmtW(t.top)}, esforço ${t.effort})`).join(' · ') });
+  }
+
+  if (diet && diet.enough && diet.effortHigh - diet.effortLow >= 1) {
+    insights.push({ status: 'warning', title: 'O déficit está pesando no treino', text: `Depois de dias com déficit médio de ${diet.highDeficit} kcal, seu esforço foi ${String(diet.effortHigh).replace('.', ',')}; com ${diet.lowDeficit} kcal, ${String(diet.effortLow).replace('.', ',')}. Comer mais carboidrato antes dos treinos pesados pode ajudar.` });
+  } else if (diet && diet.enough) {
+    insights.push({ status: 'good', title: 'Déficit sem afetar o treino', text: `Seu esforço ficou parecido com déficit alto (${diet.highDeficit} kcal → ${String(diet.effortHigh).replace('.', ',')}) ou baixo (${diet.lowDeficit} kcal → ${String(diet.effortLow).replace('.', ',')}).` });
+  }
+
+  return {
+    today,
+    weeks,
+    acute,
+    chronic,
+    ratio,
+    zone: zone ? { zone: zone.zone, status: zone.status, label: zone.label } : null,
+    historyOk,
+    avg14,
+    avgPrev14,
+    sessions14: last14.length,
+    loads,
+    diet,
+    insights,
+    estimatedDays: sessions.filter(s => s.estimated).length,
+  };
+}
+
+app.get('/api/esforco/analise', (req, res) => {
+  res.json(effortAnalysis(req.session.userId));
 });
 
 // Gamificação: XP, nível e estatísticas
@@ -829,9 +1089,25 @@ function weekdayOf(dateStr) {
   return (new Date(dateStr + 'T12:00:00').getDay() + 6) % 7;
 }
 
+// Remanejamentos de semana do usuário: { week_start: { diaExibido: diaDoPlano|null } }
+function planShifts(uid) {
+  const out = {};
+  db.prepare('SELECT week_start, map FROM plan_week_shift WHERE user_id = ?').all(uid)
+    .forEach(r => { try { out[r.week_start] = JSON.parse(r.map); } catch { /* ignora linha inválida */ } });
+  return out;
+}
+
+// Dia do plano que vale numa data (null = descanso remanejado). Sem remanejamento = o próprio dia.
+function planWeekdayFor(dateStr, shifts) {
+  const wd = weekdayOf(dateStr);
+  const map = shifts[mondayOf(dateStr)];
+  return map && Object.prototype.hasOwnProperty.call(map, wd) ? map[wd] : wd;
+}
+
 function computeGami(userId) {
   const logs = db.prepare('SELECT date, plan_item_id FROM workout_log WHERE user_id = ?').all(userId);
   const plan = db.prepare('SELECT id, weekday FROM plan_items WHERE user_id = ?').all(userId);
+  const shifts = planShifts(userId);
   const planByWeekday = {};
   plan.forEach(p => { planByWeekday[p.weekday] = (planByWeekday[p.weekday] || 0) + 1; });
 
@@ -843,7 +1119,8 @@ function computeGami(userId) {
   let completeDays = 0;
   const completeDates = [];
   for (const [date, set] of Object.entries(byDate)) {
-    const planned = planByWeekday[weekdayOf(date)] || 0;
+    const pwd = planWeekdayFor(date, shifts);
+    const planned = pwd == null ? 0 : planByWeekday[pwd] || 0;
     if (planned > 0 && set.size >= planned) {
       completeDays++;
       completeDates.push(date);
@@ -1142,9 +1419,10 @@ function buildAchievements(uid) {
   // Semana perfeita: alguma semana com dia completo em todos os dias planejados
   const plannedWds = db.prepare('SELECT DISTINCT weekday FROM plan_items WHERE user_id = ?').all(uid).map(r => r.weekday);
   const byWeek = {};
+  const shifts = planShifts(uid);
   g.completeDates.forEach(d => {
     const wk = mondayOf(d);
-    (byWeek[wk] = byWeek[wk] || new Set()).add(weekdayOf(d));
+    (byWeek[wk] = byWeek[wk] || new Set()).add(planWeekdayFor(d, shifts));
   });
   const perfectWeek = plannedWds.length > 0 &&
     Object.values(byWeek).some(s => plannedWds.every(w => s.has(w)));
@@ -2106,7 +2384,7 @@ app.get('/api/wrapped', (req, res) => {
 app.get('/api/wrapped/today', (req, res) => {
   const uid = req.session.userId;
   const today = new Date().toLocaleDateString('en-CA');
-  const wd = weekdayOf(today);
+  const wd = planWeekdayFor(today, planShifts(uid));
 
   const exercicios = db.prepare(`
     SELECT el.name, el.muscle, pi.current_weight
@@ -2255,6 +2533,26 @@ function buildAiContext(uid) {
     lines.push(`Últimos 30 dias: ${t30.n} dias de treino (${t30.m} musculação, ${t30.c} corrida), nota média ${fmtNum(t30.r)}/5.`);
   }
 
+  // Esforço percebido (RPE 1–10) marcado pelo usuário ao fim de cada treino
+  const efforts = db.prepare('SELECT date, effort FROM workout_effort WHERE user_id = ? AND date >= ? ORDER BY date')
+    .all(uid, daysAgo(29));
+  if (efforts.length) {
+    const avg = efforts.reduce((s, e) => s + e.effort, 0) / efforts.length;
+    const recent = efforts.slice(-10).map(e => `${e.date}: ${e.effort}`).join('; ');
+    lines.push(`Esforço percebido (RPE 1–10, escala de Borg CR10): média ${fmtNum(avg)} em ${efforts.length} treinos nos últimos 30 dias. Recentes — ${recent}.`);
+    const ea = effortAnalysis(uid);
+    lines.push(`Carga de treino (esforço × minutos, em UA): últimos 7 dias ${ea.acute} UA; média semanal das últimas 4 semanas ${ea.chronic} UA${ea.ratio != null ? `; razão aguda/crônica ${fmtNum(ea.ratio, 2)} (${ea.zone.label.toLowerCase()}; ideal 0,8–1,3, acima de 1,5 = risco de lesão)` : ' (histórico ainda curto para a razão aguda/crônica)'}.`);
+    if (ea.avg14 != null) lines.push(`Esforço médio: ${fmtNum(ea.avg14)} nas últimas 2 semanas${ea.avgPrev14 != null ? ` vs ${fmtNum(ea.avgPrev14)} nas 2 anteriores` : ''}.`);
+    if (ea.diet && ea.diet.enough) {
+      lines.push(`Esforço × dieta: após dias com déficit médio de ${ea.diet.highDeficit} kcal o esforço foi ${fmtNum(ea.diet.effortHigh)}; após ${ea.diet.lowDeficit} kcal foi ${fmtNum(ea.diet.effortLow)}.`);
+    }
+    if (ea.insights.length) {
+      lines.push('Alertas do app sobre o esforço:');
+      ea.insights.forEach(i => lines.push(`- ${i.title}: ${i.text}`));
+    }
+    lines.push('Ao comentar o treino, cruze o esforço com as cargas e com o déficit da dieta: esforço subindo com a mesma carga durante um déficit grande indica que o déficit está pesando — sugira ajuste de carboidrato perto do treino ou semana de descarga antes de cortar mais calorias.');
+  }
+
   // Calorias gastas no treino (estimativa por MET)
   const c7 = caloriesRange(uid, daysAgo(6), today);
   const c30 = caloriesRange(uid, daysAgo(29), today);
@@ -2280,6 +2578,11 @@ function buildAiContext(uid) {
       lines.push(`- ${WEEKDAYS_PT[wd]}: ${items.map(i =>
         `${i.name}${i.scheme ? ` (${i.scheme})` : ''}${i.current_weight ? ` @ ${fmtNum(i.current_weight)} kg` : ''}`
       ).join(', ')}`);
+    }
+    const shift = planShifts(uid)[mondayOf(today)];
+    if (shift && Object.keys(shift).length) {
+      const desc = Object.entries(shift).map(([d, b]) => `${WEEKDAYS_PT[d]} → ${b == null ? 'descanso' : `treino de ${WEEKDAYS_PT[b]}`}`).join('; ');
+      lines.push(`Só nesta semana o plano foi remanejado: ${desc}.`);
     }
   }
 

@@ -5531,3 +5531,95 @@ body.challenge-mode .nav-desafio:not(.active) .nav-icon { color: var(--ch-c); }
 @media (prefers-reduced-motion: reduce) {
   .ch-live i { animation: none; }
 }
+
+/* ===== Esforço do treino (RPE 1–10) ===== */
+.effort {
+  margin-top: 14px;
+  padding: 12px 14px 10px;
+  border-radius: 14px;
+  background: var(--card-2, #232325);
+  border: 1px solid var(--border-soft, #2d2d2f);
+  text-align: left;
+}
+.effort-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.effort-title { font-size: 0.82rem; font-weight: 700; color: var(--text, #e0e0e0); }
+.effort-val {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--faint, #8e8e93);
+  font-variant-numeric: tabular-nums;
+  transition: color 0.2s ease;
+}
+.effort-scale {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 5px;
+}
+.effort-pip {
+  height: 34px;
+  min-width: 0;
+  border-radius: 9px;
+  border: 1.5px solid #3a3a3d;
+  background: transparent;
+  color: #8e8e93;
+  font-size: 0.8rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.18s var(--spring-bounce, ease);
+}
+.effort-pip:hover { border-color: var(--ec); color: var(--ec); }
+.effort-pip.on {
+  background: var(--ec);
+  border-color: var(--ec);
+  color: #111;
+  opacity: 0.45;
+}
+.effort-pip.sel { opacity: 1; transform: scale(1.08); box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08); }
+.effort-pip:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.effort-ends {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 0.68rem;
+  color: var(--faint, #8e8e93);
+}
+.treino-popup .effort { margin: 0 0 14px; min-width: min(340px, calc(100vw - 80px)); }
+.treino-popup .effort-pip { height: 30px; }
+
+/* Selo do esforço no calendário */
+.cal-effort {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9px;
+  color: #111;
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 17px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 2px #1a1a1a;
+  pointer-events: none;
+}
+
+/* Na faixa da semana o selo vira uma barrinha na cor do esforço (o número aparece no painel do dia) */
+.week-day .cal-effort { top: auto; right: 12px; bottom: 3px; left: 12px; min-width: 0; height: 3px; padding: 0; font-size: 0; box-shadow: none; }
+
+.treino-stats { grid-template-columns: repeat(5, 1fr); }
+@media (max-width: 600px) {
+  .treino-stats { grid-template-columns: repeat(2, 1fr); }
+  .treino-stats .stat-card:last-child { grid-column: 1 / -1; }
+  .effort-scale { gap: 4px; }
+  .effort-pip { height: 32px; font-size: 0.74rem; border-radius: 8px; }
+}

@@ -1443,6 +1443,7 @@ document.getElementById('btn-year-next').addEventListener('click', () => {
 // ======== TREINO TRACKER ========
 let treinoData = [];
 let treinoStats = {};
+let treinoEffort = {}; // date -> esforço (1–10) do ano exibido
 let treinoYear = new Date().getFullYear();
 let treinoMonth = new Date().getMonth(); // 0-11
 const MONTH_NAMES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
@@ -1478,12 +1479,15 @@ const ICON_DUMBBELL = ICONS.dumbbell;
 const ICON_RUN = ICONS.run;
 
 async function loadTreinoData() {
-  const [data, stats] = await Promise.all([
+  const [data, stats, efforts] = await Promise.all([
     api('GET', `/api/treino?year=${treinoYear}`),
     api('GET', '/api/treino/stats'),
+    api('GET', `/api/esforco?start=${treinoYear}-01-01&end=${treinoYear}-12-31`),
   ]);
   treinoData = data;
   treinoStats = stats;
+  treinoEffort = {};
+  efforts.forEach(e => { treinoEffort[e.date] = e.effort; });
   renderTreinoUI();
 }
 
@@ -1493,6 +1497,9 @@ function renderTreinoUI() {
   countUp(document.getElementById('treino-stat-best'), treinoStats.bestStreak || 0);
   countUp(document.getElementById('treino-stat-musc'), treinoStats.totalMusc || 0);
   countUp(document.getElementById('treino-stat-corrida'), treinoStats.totalCorrida || 0);
+  const effStat = document.getElementById('treino-stat-esforco');
+  const avgEff = treinoStats.avgEffort30;
+  effStat.textContent = avgEff != null ? String(avgEff).replace('.', ',') : '—';
 
   const flameWrap = document.getElementById('cal-flame');
   if (flameWrap) flameWrap.classList.toggle('has-streak', (treinoStats.currentStreak || 0) > 0);
@@ -1591,6 +1598,16 @@ function renderTreinoCalendar() {
 
     cell.dataset.date = dateStr;
 
+    const eff = treinoEffort[dateStr];
+    if (eff) {
+      const badge = document.createElement('span');
+      badge.className = 'cal-effort';
+      badge.style.background = effortColor(eff);
+      badge.textContent = eff;
+      badge.title = `Esforço ${eff} · ${EFFORT_LABELS[eff]}`;
+      cell.appendChild(badge);
+    }
+
     if (hasMusc || hasCorrida) {
       const icons = document.createElement('div');
       icons.className = 'cal-day-icons';
@@ -1655,6 +1672,13 @@ function openTreinoDayPopup(date, record) {
       <button class="btn-secondary btn-sm" id="treino-popup-close">Fechar</button>
     </div>
   `;
+  if (date <= todayStr()) {
+    popup.querySelector('.treino-popup-actions').before(effortPicker(date, treinoEffort[date], v => {
+      if (v) treinoEffort[date] = v;
+      else delete treinoEffort[date];
+      loadTreinoData(); // atualiza também a média de 30 dias
+    }));
+  }
   document.body.appendChild(popup);
 
   let state = { musculacao: hasMusc ? 1 : 0, corrida: hasCorrida ? 1 : 0 };
@@ -1719,6 +1743,61 @@ function toastMsg(text) {
   setTimeout(() => toast.remove(), 2100);
 }
 
+// ======== ESFORÇO DO TREINO (RPE 1–10) ========
+const EFFORT_LABELS = ['', 'Muito leve', 'Muito leve', 'Leve', 'Leve', 'Moderado', 'Moderado', 'Intenso', 'Intenso', 'Muito intenso', 'Máximo'];
+
+// Verde (1) → vermelho (10)
+function effortColor(v) {
+  return `hsl(${Math.round(140 - (v - 1) * 140 / 9)}, 72%, 52%)`;
+}
+
+// Seletor 1–10 de um dia. Tocar no valor marcado limpa a marcação.
+function effortPicker(date, current, onSaved) {
+  const wrap = document.createElement('div');
+  wrap.className = 'effort';
+  let value = current || 0;
+
+  const paint = () => {
+    wrap.innerHTML = `
+      <div class="effort-head">
+        <span class="effort-title">Esforço do treino</span>
+        <span class="effort-val"${value ? ` style="color:${effortColor(value)}"` : ''}>${value ? `${value} · ${EFFORT_LABELS[value]}` : 'Como foi?'}</span>
+      </div>
+      <div class="effort-scale" role="radiogroup" aria-label="Esforço do treino de 1 a 10">
+        ${Array.from({ length: 10 }, (_, i) => i + 1).map(v => `
+          <button type="button" class="effort-pip${v <= value ? ' on' : ''}${v === value ? ' sel' : ''}" data-v="${v}"
+            role="radio" aria-checked="${v === value}" title="${v} · ${EFFORT_LABELS[v]}"
+            style="--ec:${effortColor(v)}">${v}</button>`).join('')}
+      </div>
+      <div class="effort-ends"><span>Leve</span><span>Máximo</span></div>
+    `;
+    wrap.querySelectorAll('.effort-pip').forEach(btn => {
+      btn.addEventListener('click', async e => {
+        e.stopPropagation();
+        const v = +btn.dataset.v;
+        const prev = value;
+        value = v === value ? 0 : v;
+        paint();
+        let res;
+        try {
+          res = await api('POST', '/api/esforco', { date, effort: value });
+        } catch {
+          res = { error: 'Não foi possível salvar o esforço' };
+        }
+        if (res.error) {
+          value = prev;
+          paint();
+          toastMsg(res.error);
+          return;
+        }
+        if (onSaved) onSaved(value);
+      });
+    });
+  };
+  paint();
+  return wrap;
+}
+
 let cicloPlan = [];
 let cicloLogs = [];
 let cicloGami = {};
@@ -1740,6 +1819,7 @@ function weekDates() {
 
 let cicloSummary = {};
 let cicloKcalWeek = { days: [], kcal: 0 }; // /api/calorias/periodo da semana atual
+let cicloEffort = {};                      // date -> esforço (1–10) da semana atual
 
 // Cardio registra tempo + distância em vez de séries
 function isCardio(p) {
@@ -1773,14 +1853,19 @@ function fmtKcal(n) {
 
 async function loadCicloData() {
   const dates = weekDates();
-  const [plan, logs, gami, library, summary, kcalWeek] = await Promise.all([
+  const [plan, logs, gami, library, summary, kcalWeek, efforts, shift] = await Promise.all([
     api('GET', '/api/plan'),
     api('GET', `/api/workout-log?start=${dates[0]}&end=${dates[6]}`),
     api('GET', '/api/gamification'),
     api('GET', '/api/library'),
     api('GET', '/api/progressao/summary'),
     api('GET', `/api/calorias/periodo?start=${dates[0]}&end=${dates[6]}`),
+    api('GET', `/api/esforco?start=${dates[0]}&end=${dates[6]}`),
+    api('GET', '/api/plan/shift'),
   ]);
+  planShift = shift.map || {};
+  cicloEffort = {};
+  efforts.forEach(e => { cicloEffort[e.date] = e.effort; });
   cicloPlan = plan;
   cicloLogs = logs;
   cicloGami = gami;
@@ -1792,8 +1877,23 @@ async function loadCicloData() {
   renderCiclo();
 }
 
+// Remanejamento só da semana atual (ex.: faltou segunda e empurrou o treino um dia):
+// { diaExibido: diaDoPlano | null (descanso) }. Dias fora do map seguem o plano.
+let planShift = {};
+
+function planWeekday(wd) {
+  return Object.prototype.hasOwnProperty.call(planShift, wd) ? planShift[wd] : wd;
+}
+
+// Em que dia desta semana aparece o treino de um dia do plano (null = não aparece)
+function displayWeekdayOf(planWd) {
+  for (let wd = 0; wd < 7; wd++) if (planWeekday(wd) === planWd) return wd;
+  return null;
+}
+
 function dayItems(weekday) {
-  return cicloPlan.filter(p => p.weekday === weekday);
+  const pwd = planWeekday(weekday);
+  return pwd == null ? [] : cicloPlan.filter(p => p.weekday === pwd);
 }
 
 function isDone(planItemId, date) {
@@ -1830,9 +1930,14 @@ function renderGami() {
 
   // % da semana atual
   const dates = weekDates();
-  const planned = cicloPlan.length;
+  let planned = 0;
   let done = 0;
-  cicloPlan.forEach(p => { if (isDone(p.id, dates[p.weekday])) done++; });
+  cicloPlan.forEach(p => {
+    const wd = displayWeekdayOf(p.weekday);
+    if (wd == null) return;
+    planned++;
+    if (isDone(p.id, dates[wd])) done++;
+  });
   const weekPct = planned > 0 ? Math.round((done / planned) * 100) : 0;
   countUp(document.getElementById('gami-week-pct'), weekPct, { suffix: '%' });
   countUp(document.getElementById('gami-kcal-week'), (cicloKcalWeek && cicloKcalWeek.kcal) || 0);
@@ -1861,6 +1966,15 @@ function renderWeekStrip() {
       <span class="week-day-info">${complete ? '✓' : items.length ? `${done}/${items.length}` : '·'}</span>
       <span class="week-day-dots">${muscles.slice(0, 3).map(m => `<i class="dot ${muscleClass(m)}"></i>`).join('')}</span>
     `;
+    const eff = cicloEffort[dates[wd]];
+    if (eff) {
+      const badge = document.createElement('span');
+      badge.className = 'cal-effort';
+      badge.style.background = effortColor(eff);
+      badge.textContent = eff;
+      badge.title = `Esforço ${eff} · ${EFFORT_LABELS[eff]}`;
+      btn.appendChild(badge);
+    }
     btn.addEventListener('click', () => { selectedWeekday = wd; renderCiclo(); });
     strip.appendChild(btn);
   }
@@ -1873,9 +1987,13 @@ function renderDay() {
 
   document.getElementById('day-title').textContent = WEEKDAY_NAMES[selectedWeekday];
   const muscles = [...new Set(items.map(p => p.muscle))];
-  document.getElementById('day-sub').textContent = muscles.length
+  const pwd = planWeekday(selectedWeekday);
+  const shiftTxt = pwd === selectedWeekday ? ''
+    : pwd == null ? ' · descanso (remanejado nesta semana)'
+    : ` · treino de ${WEEKDAY_NAMES[pwd].toLowerCase()} (só nesta semana)`;
+  document.getElementById('day-sub').textContent = (muscles.length
     ? `${formatDate(date)} · ${muscles.join(' + ')}`
-    : formatDate(date);
+    : formatDate(date)) + shiftTxt;
 
   const listEl = document.getElementById('day-exercises');
   const emptyEl = document.getElementById('day-empty');
@@ -1935,6 +2053,17 @@ function renderDay() {
 
     listEl.appendChild(card);
   });
+
+  // Esforço do dia: só para dias que já passaram/hoje, com algo concluído ou já marcado
+  const effEl = document.getElementById('day-esforco');
+  effEl.innerHTML = '';
+  if (date <= todayStr() && (items.some(p => isDone(p.id, date)) || cicloEffort[date])) {
+    effEl.appendChild(effortPicker(date, cicloEffort[date], v => {
+      if (v) cicloEffort[date] = v;
+      else delete cicloEffort[date];
+      renderWeekStrip();
+    }));
+  }
 
   fillDayKcal(date);
 }
@@ -2643,7 +2772,9 @@ function renderLibrary() {
     card.addEventListener('click', async ev => {
       if (ev.target.closest('.lib-del')) return;
       if (inDay.has(e.id)) return;
-      await api('POST', '/api/plan', { weekday: selectedWeekday, exercise_id: e.id });
+      // Num dia remanejado, o exercício entra no dia do plano que ele está mostrando
+      const pwd = planWeekday(selectedWeekday);
+      await api('POST', '/api/plan', { weekday: pwd == null ? selectedWeekday : pwd, exercise_id: e.id });
       toastMsg(`${e.name} adicionado em ${WEEKDAY_NAMES[selectedWeekday]}`);
       await loadCicloData();
       renderLibrary();
@@ -2729,7 +2860,7 @@ let hojeMuscles = '';
 
 async function loadHojeData() {
   const today = todayStr();
-  const [plan, logs, gami, tstats, wcfg, wint, ranking, kcal] = await Promise.all([
+  const [plan, logs, gami, tstats, wcfg, wint, ranking, kcal, effort, shift] = await Promise.all([
     api('GET', '/api/plan'),
     api('GET', `/api/workout-log?start=${today}&end=${today}`),
     api('GET', '/api/gamification'),
@@ -2738,14 +2869,17 @@ async function loadHojeData() {
     api('GET', `/api/water-intake?year=${today.slice(0, 4)}`),
     api('GET', '/api/ranking'),
     api('GET', `/api/calorias?date=${today}`),
+    api('GET', `/api/esforco?start=${today}&end=${today}`),
+    api('GET', '/api/plan/shift'),
   ]);
-  renderHoje(plan, logs, gami, tstats, wcfg, wint, ranking, kcal);
+  planShift = shift.map || {};
+  renderHoje(plan, logs, gami, tstats, wcfg, wint, ranking, kcal, effort[0] ? effort[0].effort : 0);
   refreshChallenge();
 }
 
 
 
-function renderHoje(plan, logs, gami, tstats, wcfg, wint, ranking, kcal) {
+function renderHoje(plan, logs, gami, tstats, wcfg, wint, ranking, kcal, effort) {
   const now = new Date();
   const today = todayStr();
   const wd = (now.getDay() + 6) % 7;
@@ -2758,15 +2892,17 @@ function renderHoje(plan, logs, gami, tstats, wcfg, wint, ranking, kcal) {
     `${sauda}${nome ? ', ' + nome : ''}! ${WEEKDAY_NAMES[wd]}, ${formatDate(today)}`;
 
   // Treino de hoje
-  const items = plan.filter(p => p.weekday === wd);
+  const pwd = planWeekday(wd);
+  const items = pwd == null ? [] : plan.filter(p => p.weekday === pwd);
   const doneSet = new Set(logs.map(l => l.plan_item_id));
   hojeHasTreino = items.length > 0;
   hojeMuscles = [...new Set(items.map(p => p.muscle))].join(' + ');
 
   const doneCount = items.filter(p => doneSet.has(p.id)).length;
   const kcalTxt = kcal && kcal.kcal > 0 ? ` · ${fmtKcal(kcal.kcal)} kcal` : '';
+  const shiftTxt = pwd != null && pwd !== wd ? ` · treino de ${WEEKDAY_NAMES[pwd].toLowerCase()}` : '';
   document.getElementById('hoje-treino-sub').textContent = items.length
-    ? `${hojeMuscles} · ${doneCount}/${items.length} concluídos${kcalTxt}`
+    ? `${hojeMuscles} · ${doneCount}/${items.length} concluídos${kcalTxt}${shiftTxt}`
     : '';
   document.getElementById('btn-hoje-postar').style.display = doneCount > 0 ? '' : 'none';
 
@@ -2801,6 +2937,15 @@ function renderHoje(plan, logs, gami, tstats, wcfg, wint, ranking, kcal) {
     listEl.appendChild(row);
   });
   animateIn(listEl.children, 0.035);
+
+  // Esforço: aparece depois do primeiro exercício concluído (ou se já foi marcado)
+  const effEl = document.getElementById('hoje-esforco');
+  effEl.innerHTML = '';
+  if (doneCount > 0 || effort) {
+    effEl.appendChild(effortPicker(today, effort, v => {
+      if (v) toastMsg(`Esforço ${v}/10 registrado 💪`);
+    }));
+  }
 
   // Água de hoje
   const todayRec = wint.find(r => r.date === today);

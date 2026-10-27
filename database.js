@@ -276,6 +276,30 @@ db.exec(`
   )
 `);
 
+// Remanejamento do plano numa semana específica (ex.: faltou segunda, empurra tudo um dia).
+// map = { "<dia exibido 0-6>": <dia do plano 0-6> | null (descanso) }; dias fora do map seguem o plano.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS plan_week_shift (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    week_start TEXT NOT NULL,
+    map TEXT NOT NULL,
+    UNIQUE(user_id, week_start)
+  )
+`);
+
+// Esforço percebido da sessão (RPE 1–10, escala de Borg CR10). Um por dia: vale para o
+// treino inteiro, seja ele do ciclo, musculação avulsa ou corrida.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS workout_effort (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    date TEXT NOT NULL,
+    effort INTEGER NOT NULL,
+    UNIQUE(user_id, date)
+  )
+`);
+
 // Popular a biblioteca global (user_id NULL) a partir do seed.
 // Top-up idempotente: insere apenas os nomes que ainda não existem, preservando ids.
 (function seedExerciseLibrary() {
