@@ -5510,6 +5510,27 @@ body.challenge-mode .nav-desafio:not(.active) .nav-icon { color: var(--ch-c); }
 }
 .ch-chip-btn:hover { border-color: #5a5a5e; }
 
+/* ---- Editor de déficit por semana ---- */
+.ch-def-edit { margin: 4px 0 12px; }
+.ch-def-edit[hidden] { display: none; }
+.ch-def-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; font-size: 0.82rem; font-weight: 600; color: var(--muted); }
+.ch-def-all { display: flex; align-items: center; gap: 6px; }
+.ch-def-all input { width: 78px; }
+.ch-def-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 8px; }
+.ch-def-cell { display: flex; flex-direction: column; gap: 4px; font-size: 0.7rem; font-weight: 700; color: var(--faint); }
+.ch-def-edit input {
+  width: 100%;
+  padding: 7px 8px;
+  border-radius: 8px;
+  background: var(--card-3);
+  border: 1px solid #3a3a3e;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+}
+.ch-def-edit input:focus { outline: none; border-color: #5a5a5e; }
+.ch-def-btn { display: block; margin-top: 12px; }
+
 @media (max-width: 900px) {
   .ch-grid { grid-template-columns: 1fr; }
   .ch-week { grid-template-columns: 1fr; gap: 6px; }

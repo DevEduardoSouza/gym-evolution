@@ -1222,12 +1222,25 @@
             <input type="number" id="chs-peso" step="0.1" min="30" max="400" placeholder="Ex: 90">
           </div>
         </div>
+        <div class="ch-def-edit" id="chs-deficit" hidden></div>
         <p id="chs-preview" class="profile-hint"></p>
         <div class="form-actions">
           <button type="button" id="btn-chs-cancel" class="btn-secondary">Cancelar</button>
           <button type="submit" class="btn-primary" id="btn-chs-go">Começar desafio</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <div id="modal-ch-deficit" class="modal-overlay hidden">
+    <div class="modal ch-modal">
+      <h2>Déficit por semana</h2>
+      <p class="profile-hint">Quantas kcal abaixo do gasto você quer ficar por dia em cada semana do desafio. Os dias já passados são reavaliados com a nova meta.</p>
+      <div class="ch-def-edit" id="chdef-editor"></div>
+      <div class="form-actions">
+        <button type="button" id="btn-chdef-cancel" class="btn-secondary">Cancelar</button>
+        <button type="button" id="btn-chdef-save" class="btn-primary">Salvar</button>
+      </div>
     </div>
   </div>
 

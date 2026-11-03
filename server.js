@@ -2021,6 +2021,16 @@ function addDaysStr(dateStr, n) {
   return d.toLocaleDateString('en-CA');
 }
 
+// Déficit por semana escolhido pelo usuário: inteiros de 0 a 2000 kcal, uma entrada por
+// semana do desafio (lista curta repete a última, lista longa é cortada). null = inválido.
+function parseDeficitWeeks(input, days) {
+  if (!Array.isArray(input) || !input.length) return null;
+  const vals = input.map(v => Math.round(+v));
+  if (vals.some(v => !Number.isFinite(v) || v < 0 || v > 2000)) return null;
+  const n = Math.ceil(days / 7);
+  return Array.from({ length: n }, (_, i) => vals[Math.min(i, vals.length - 1)]);
+}
+
 function deficitTargetFor(rules, week) {
   const w = rules.deficit.weeks;
   return w[Math.min(week, w.length) - 1];
@@ -2233,6 +2243,11 @@ app.post('/api/challenges', (req, res) => {
   }
 
   const rules = JSON.parse(JSON.stringify(tpl.rules));
+  if (rules.deficit && req.body.deficit_weeks !== undefined) {
+    const weeks = parseDeficitWeeks(req.body.deficit_weeks, tpl.days);
+    if (!weeks) return res.status(400).json({ error: 'Déficit inválido: use valores de 0 a 2000 kcal por semana' });
+    rules.deficit.weeks = weeks;
+  }
   if (hasWaterRule(rules)) {
     if (rules.water_ml) {
       rules.water_target_ml = rules.water_ml;
@@ -2288,6 +2303,21 @@ app.post('/api/challenges/:id/checkin', (req, res) => {
     db.prepare('UPDATE challenge_checkins SET free_meal = ? WHERE challenge_id = ? AND date = ?').run(on, ch.id, date);
   }
   res.json(evaluateChallenge(uid, ch, today));
+});
+
+// Ajusta o déficit diário de cada semana de um desafio em andamento
+app.put('/api/challenges/:id/deficit', (req, res) => {
+  const uid = req.session.userId;
+  const ch = db.prepare("SELECT * FROM challenges WHERE id = ? AND user_id = ? AND status = 'active'").get(+req.params.id, uid);
+  if (!ch) return res.status(404).json({ error: 'Desafio não encontrado' });
+  const rules = JSON.parse(ch.rules);
+  if (!rules.deficit) return res.status(400).json({ error: 'Este desafio não tem a regra de déficit' });
+  const weeks = parseDeficitWeeks(req.body.weeks, ch.days);
+  if (!weeks) return res.status(400).json({ error: 'Déficit inválido: use valores de 0 a 2000 kcal por semana' });
+  rules.deficit.weeks = weeks;
+  db.prepare('UPDATE challenges SET rules = ? WHERE id = ?').run(JSON.stringify(rules), ch.id);
+  const today = isDateStr(req.body.today) ? req.body.today : new Date().toLocaleDateString('en-CA');
+  res.json(evaluateChallenge(uid, { ...ch, rules: JSON.stringify(rules) }, today));
 });
 
 app.post('/api/challenges/:id/abandon', (req, res) => {

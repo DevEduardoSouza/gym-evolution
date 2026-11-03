@@ -5763,6 +5763,7 @@ function renderChActive(ch) {
       <div class="hoje-card-head"><h3>Regras</h3></div>
       <ul class="ch-rule-list">${chRulesText(ch.rules, ch.rules.water_peso_kg).map(x => `<li>${esc(x)}</li>`).join('')}</ul>
       ${plan}
+      ${ch.rules.deficit ? '<button type="button" class="btn-secondary btn-sm ch-def-btn" id="btn-ch-deficit">Ajustar déficit por semana</button>' : ''}
       <button type="button" class="ch-abandon" id="btn-ch-abandon">Encerrar desafio</button>
     </div>`;
 
@@ -5801,6 +5802,8 @@ function renderChActive(ch) {
   el.innerHTML = cover + warn + `<div class="ch-grid">${todayCard}${rulesCard}</div>` + journey;
   if (ch.today) bindChRuleActions(document.getElementById('ch-today-rules'), ch.today.date);
   el.querySelectorAll('.ch-cell[data-date]').forEach(c => c.addEventListener('click', () => openChDay(c.dataset.date)));
+  const defBtn = document.getElementById('btn-ch-deficit');
+  if (defBtn) defBtn.addEventListener('click', openChDeficit);
   document.getElementById('btn-ch-abandon').addEventListener('click', async () => {
     if (!confirm(`Encerrar "${ch.name}"? O progresso fica no histórico, mas o desafio para aqui.`)) return;
     const res = await api('POST', `/api/challenges/${ch.id}/abandon`);
@@ -5838,6 +5841,36 @@ function renderChCatalog() {
     </div>`).join('');
 }
 
+// ---- Editor do déficit por semana (modal de início e ajuste do desafio ativo) ----
+// Uma caixa por semana + "aplicar a todas". Lista curta do modelo repete a última semana.
+function renderDeficitEditor(box, weeks, days) {
+  const n = Math.ceil(days / 7);
+  const vals = Array.from({ length: n }, (_, i) => weeks[Math.min(i, weeks.length - 1)]);
+  box.innerHTML = `
+    <div class="ch-def-head">
+      <span>Déficit diário por semana (kcal)</span>
+      <span class="ch-def-all">
+        <input type="number" min="0" max="2000" step="50" placeholder="todas" aria-label="Valor para todas as semanas">
+        <button type="button" class="ch-chip-btn">Aplicar a todas</button>
+      </span>
+    </div>
+    <div class="ch-def-grid">${vals.map((v, i) => `
+      <label class="ch-def-cell"><span>S${i + 1}</span><input type="number" min="0" max="2000" step="50" value="${v}" required></label>`).join('')}
+    </div>`;
+  const all = box.querySelector('.ch-def-all input');
+  box.querySelector('.ch-def-all button').addEventListener('click', () => {
+    const v = parseInt(all.value, 10);
+    if (!(v >= 0 && v <= 2000)) return toastMsg('Use um valor de 0 a 2000 kcal');
+    box.querySelectorAll('.ch-def-grid input').forEach(inp => { inp.value = v; });
+  });
+}
+
+// Lê o editor; null se alguma semana estiver vazia ou fora de 0–2000
+function readDeficitEditor(box) {
+  const vals = [...box.querySelectorAll('.ch-def-grid input')].map(inp => parseInt(inp.value, 10));
+  return vals.every(v => v >= 0 && v <= 2000) ? vals : null;
+}
+
 // ---- Modal: começar desafio ----
 const modalChStart = document.getElementById('modal-ch-start');
 
@@ -5850,6 +5883,10 @@ function openChStart(t) {
   document.getElementById('chs-date').value = todayStr();
   document.getElementById('chs-peso-group').style.display = t.rules.water_ml_per_kg ? '' : 'none';
   document.getElementById('chs-peso').value = chData.peso || '';
+  const def = document.getElementById('chs-deficit');
+  def.hidden = !t.rules.deficit;
+  if (t.rules.deficit) renderDeficitEditor(def, t.rules.deficit.weeks, t.days);
+  else def.innerHTML = '';
   updateChsPreview();
   modalChStart.classList.remove('hidden');
 }
@@ -5888,12 +5925,18 @@ modalChStart.addEventListener('click', e => { if (e.target === modalChStart) mod
 
 document.getElementById('ch-start-form').addEventListener('submit', async e => {
   e.preventDefault();
+  let deficitWeeks;
+  if (chStartTpl.rules.deficit) {
+    deficitWeeks = readDeficitEditor(document.getElementById('chs-deficit'));
+    if (!deficitWeeks) return toastMsg('Preencha o déficit de cada semana (0 a 2000 kcal)');
+  }
   const btn = document.getElementById('btn-chs-go');
   btn.disabled = true;
   const res = await api('POST', '/api/challenges', {
     template: chStartTpl.id,
     start_date: document.getElementById('chs-date').value,
     peso: parseFloat(document.getElementById('chs-peso').value) || null,
+    deficit_weeks: deficitWeeks,
     today: todayStr(),
   });
   btn.disabled = false;
@@ -5906,6 +5949,33 @@ document.getElementById('ch-start-form').addEventListener('submit', async e => {
   window.scrollTo({ top: 0, behavior: 'smooth' });
   confetti();
   toastMsg(`${res.emoji} Desafio iniciado. Bora!`);
+});
+
+// ---- Modal: ajustar déficit do desafio ativo ----
+const modalChDeficit = document.getElementById('modal-ch-deficit');
+
+function openChDeficit() {
+  const ch = chData && chData.active;
+  if (!ch || !ch.rules.deficit) return;
+  renderDeficitEditor(document.getElementById('chdef-editor'), ch.rules.deficit.weeks, ch.days_total);
+  modalChDeficit.classList.remove('hidden');
+}
+
+document.getElementById('btn-chdef-cancel').addEventListener('click', () => modalChDeficit.classList.add('hidden'));
+modalChDeficit.addEventListener('click', e => { if (e.target === modalChDeficit) modalChDeficit.classList.add('hidden'); });
+document.getElementById('btn-chdef-save').addEventListener('click', async () => {
+  const weeks = readDeficitEditor(document.getElementById('chdef-editor'));
+  if (!weeks) return toastMsg('Preencha o déficit de cada semana (0 a 2000 kcal)');
+  const btn = document.getElementById('btn-chdef-save');
+  btn.disabled = true;
+  const res = await api('PUT', `/api/challenges/${chData.active.id}/deficit`, { weeks, today: todayStr() });
+  btn.disabled = false;
+  if (res.error) return toastMsg(res.error);
+  modalChDeficit.classList.add('hidden');
+  chData.active = res;
+  renderChallengeBanner();
+  renderDesafios();
+  toastMsg('Déficit atualizado');
 });
 
 // ---- Modal: um dia do desafio ----
