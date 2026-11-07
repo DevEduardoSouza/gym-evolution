@@ -5572,7 +5572,12 @@ function chRuleRows(ch, day) {
     else {
       sub = (d.value >= 0 ? `${fmtBRn(d.value)} de ${fmtBRn(d.target)} kcal` : `Superávit de ${fmtBRn(-d.value)} kcal`)
         + ` · comeu ${fmtBRn(d.kcal)}, gasto ~${fmtBRn(d.gasto)}`;
-      pct = Math.max(0, Math.min(100, (d.value / d.target) * 100));
+      pct = d.target > 0 ? Math.max(0, Math.min(100, (d.value / d.target) * 100)) : 100;
+    }
+    if (d.moved) {
+      sub += d.moved < 0
+        ? ` · meta de ${fmtBRn(d.base)} − ${fmtBRn(-d.moved)} que sobraram de outros dias`
+        : ` · meta de ${fmtBRn(d.base)} + ${fmtBRn(d.moved)} levadas para outro dia`;
     }
     rows.push({
       key: 'deficit', icon: '⚖️', title: `Déficit de ${fmtBRn(d.target)} kcal`, sub, status: d.status, pct,

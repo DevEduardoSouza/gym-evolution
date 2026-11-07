@@ -1977,6 +1977,8 @@ app.get('/api/diet-report', (req, res) => {
 
 // Catálogo fixo. Ao começar, as regras são copiadas para o desafio do usuário.
 //   deficit.weeks        déficit diário alvo (kcal) de cada semana; depois da última, repete a última
+//   deficit.transfers    [{ from, to, kcal }]: sobra de déficit de um dia levada para outro (a meta
+//                        do dia `from` sobe e a do dia `to` desce o mesmo tanto; a soma não muda)
 //   no_sugar             check-in diário "sem açúcar"
 //   free_meals_per_week  refeições livres por semana do desafio (o dia fica isento de açúcar e déficit)
 //   water_ml_per_kg      meta de água pelo peso (50 ml/kg = 1 L a cada 20 kg), fixada no início
@@ -2036,6 +2038,16 @@ function deficitTargetFor(rules, week) {
   return w[Math.min(week, w.length) - 1];
 }
 
+// Saldo de transferências por dia: positivo = cedeu déficit (meta maior), negativo = recebeu
+function deficitShifts(rules) {
+  const shift = {};
+  (rules.deficit.transfers || []).forEach(t => {
+    shift[t.from] = (shift[t.from] || 0) + t.kcal;
+    shift[t.to] = (shift[t.to] || 0) - t.kcal;
+  });
+  return shift;
+}
+
 function waterTargetMl(pesoKg, mlPerKg) {
   return Math.round((pesoKg * mlPerKg) / 50) * 50;
 }
@@ -2084,6 +2096,8 @@ function evaluateChallenge(uid, ch, today) {
     }
   }
 
+  const shifts = rules.deficit ? deficitShifts(rules) : {};
+
   const trained = new Set(Object.keys(treinoKcal).filter(d => treinoKcal[d] > 0));
   if (rules.train_per_week && hasData) {
     db.prepare('SELECT date FROM treino WHERE user_id = ? AND date >= ? AND date <= ? AND (musculacao = 1 OR corrida = 1)')
@@ -2110,7 +2124,9 @@ function evaluateChallenge(uid, ch, today) {
     const unlogged = isToday ? 'pending' : 'missing';
     const r = {};
     if (rules.deficit) {
-      const target = deficitTargetFor(rules, week);
+      const base = deficitTargetFor(rules, week);
+      const moved = shifts[date] || 0;
+      const target = Math.max(0, base + moved);
       const kcal = kcalByDate[date] || 0;
       const gasto = rotina + (treinoKcal[date] || 0);
       const value = kcal > 0 && gasto > 0 ? gasto - kcal : null;
@@ -2120,7 +2136,7 @@ function evaluateChallenge(uid, ch, today) {
       else if (value == null) status = unlogged;
       else if (value >= target) status = 'ok';
       else status = isToday ? 'pending' : 'fail';
-      r.deficit = { status, target, value, kcal, gasto };
+      r.deficit = { status, target, base, moved, value, kcal, gasto };
     }
     if (hasWaterRule(rules)) {
       const ml = waterMl[date] || 0;
@@ -2669,6 +2685,7 @@ function buildAiContext(uid) {
     const r = ev.rules;
     const regras = [];
     if (r.deficit) regras.push(`déficit diário de ${deficitTargetFor(r, ev.current_week || 1)} kcal nesta semana (plano por semana: ${r.deficit.weeks.join(', ')})`);
+    if (r.deficit && ev.today && ev.today.rules.deficit.moved) regras.push(`meta de déficit de hoje ajustada para ${ev.today.rules.deficit.target} kcal (sobra de déficit transferida entre dias)`);
     if (r.no_sugar) regras.push('sem açúcar');
     if (r.free_meals_per_week) regras.push(`${r.free_meals_per_week} refeição livre por semana`);
     if (r.water_target_ml) regras.push(`${r.water_target_ml} ml de água por dia`);
