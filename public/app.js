@@ -4484,6 +4484,7 @@ function dietDateOffsetStr(offsetDays) {
 }
 
 async function loadDietReport() {
+  if (!chData) await refreshChallenge();
   const q = dietRepMode === 'dia'
     ? `start=${dietDateOffsetStr(dietRepOffset)}&days=1`
     : `start=${dietMondayStr(dietRepOffset)}`;
@@ -4499,19 +4500,40 @@ async function loadDietReport() {
 // Só conta dias com refeição registrada; sem registro o "déficit" seria falso.
 const DAILY_ACTIVITY_FACTOR = 1.2; // rotina leve fora do treino (sentado, deslocamentos)
 
+// Déficit transferido entre dias no desafio ativo (rules.deficit.transfers):
+// positivo = o dia cedeu a sobra, negativo = o dia recebeu.
+function deficitMovedByDate() {
+  const ch = chData && chData.active;
+  const moved = {};
+  ((ch && ch.rules.deficit && ch.rules.deficit.transfers) || []).forEach(t => {
+    moved[t.from] = (moved[t.from] || 0) + t.kcal;
+    moved[t.to] = (moved[t.to] || 0) - t.kcal;
+  });
+  return moved;
+}
+
 // Calcula, por dia, consumo × gasto (repouso × rotina + treino) e o saldo.
 // saldo null = dia sem refeição registrada (não entra em soma nenhuma).
+// O saldo já considera o déficit transferido entre dias; saldoReal é o do dia em si.
 function energyBalanceDays(repDays, burn) {
   const basal = burn && burn.basal > 0 ? burn.basal : 0;
   const burnByDate = {};
   ((burn && burn.days) || []).forEach(d => { burnByDate[d.date] = d.kcal; });
+  const movedBy = deficitMovedByDate();
   return repDays.map(d => {
     const treino = burnByDate[d.date] || 0;
     const rotina = basal > 0 ? Math.round(basal * DAILY_ACTIVITY_FACTOR) : 0;
     const gasto = rotina + treino;
-    return { date: d.date, kcal: d.kcal, treino, rotina, basal, gasto, saldo: d.kcal > 0 && gasto > 0 ? Math.round(d.kcal) - gasto : null };
+    const saldoReal = d.kcal > 0 && gasto > 0 ? Math.round(d.kcal) - gasto : null;
+    const moved = saldoReal == null ? 0 : movedBy[d.date] || 0;
+    return { date: d.date, kcal: d.kcal, treino, rotina, basal, gasto, saldoReal, moved, saldo: saldoReal == null ? null : saldoReal + moved };
   });
 }
+
+// Texto curto da transferência de um dia, para notas e tooltips
+const movedNote = x => x.moved > 0
+  ? `${Math.abs(x.moved).toLocaleString('pt-BR')} kcal de déficit levadas para outro dia (real: ${fmtSignedBR(x.saldoReal)})`
+  : `inclui ${Math.abs(x.moved).toLocaleString('pt-BR')} kcal de déficit que sobraram de outros dias (real: ${fmtSignedBR(x.saldoReal)})`;
 const fmtSignedBR = n => (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(Math.round(n)).toLocaleString('pt-BR');
 
 // ======== ABA BALANÇO (déficit / superávit) ========
@@ -4521,6 +4543,7 @@ async function loadBalanco() {
   const today = todayStr();
   const monday = dietMondayStr(balOffset);
   const sunday = (() => { const d = new Date(monday + 'T12:00:00'); d.setDate(d.getDate() + 6); return d.toLocaleDateString('en-CA'); })();
+  if (!chData) await refreshChallenge();
   try {
     const [repDay, burnDay, repWeek, burnWeek] = await Promise.all([
       api('GET', `/api/diet-report?start=${today}&days=1`),
@@ -4583,7 +4606,7 @@ function renderBalancoToday(rep, burn) {
     <div class="bal-bd"><b>+${fmtBR(d.rotina - d.basal)}</b><span>rotina (×1,2)</span></div>
     <div class="bal-bd"><b class="rep-burn">+${fmtBR(d.treino)}</b><span>treino</span></div>
     <div class="bal-bd"><b>= ${fmtBR(d.gasto)}</b><span>gasto do dia</span></div>`;
-  noteEl.textContent = 'Estimativa com margem de ±25%. Serve para comparar dias, não para contabilidade exata.';
+  noteEl.textContent = (d.moved ? `Desafio: ${movedNote(d)}. ` : '') + 'Estimativa com margem de ±25%. Serve para comparar dias, não para contabilidade exata.';
 }
 
 function renderBalancoWeek(rep, burn) {
@@ -4617,7 +4640,9 @@ function renderBalancoWeek(rep, burn) {
     set('bal-w-out', '~' + fmtBR(outSum));
     set('bal-w-train', '~' + fmtBR(trainSum));
     set('bal-w-fat', `${total <= 0 ? '−' : '+'}${(Math.abs(total) / 7700).toFixed(2).replace('.', ',')} kg`);
-    document.getElementById('hb-week-note').textContent = `${logged.length} dia${logged.length === 1 ? '' : 's'} com refeição registrada. Dias sem registro não entram na conta.`;
+    const movedDays = logged.filter(x => x.moved).length;
+    document.getElementById('hb-week-note').textContent = `${logged.length} dia${logged.length === 1 ? '' : 's'} com refeição registrada. Dias sem registro não entram na conta.`
+      + (movedDays ? ` ${movedDays} dia${movedDays === 1 ? '' : 's'} com déficit transferido no desafio (o total da semana não muda).` : '');
   }
 
   // Barras por dia
@@ -4634,6 +4659,7 @@ function renderBalancoWeek(rep, burn) {
       <span class="hb-day-val">${x.saldo == null ? '' : fmtSignedBR(x.saldo)}</span>
       <div class="hb-day-track"><div class="hb-day-bar" style="height:${h}px"></div></div>
       <span class="hb-day-lbl">${WD[i]} ${+x.date.slice(8, 10)}</span>`;
+    if (x.moved) col.title = movedNote(x);
     daysEl.appendChild(col);
   });
 
@@ -4643,7 +4669,7 @@ function renderBalancoWeek(rep, burn) {
     const future = x.date > today;
     const empty = x.saldo == null;
     const cls = empty ? 'bal-empty' : x.saldo < 0 ? 'bal-neg' : 'bal-pos';
-    return `<tr class="${cls}${x.date === today ? ' bal-today' : ''}">
+    return `<tr class="${cls}${x.date === today ? ' bal-today' : ''}"${x.moved ? ` title="${movedNote(x)}"` : ''}>
       <td>${WD[i]} <small>${dm(x.date)}</small></td>
       <td>${x.kcal > 0 ? fmtBR(Math.round(x.kcal)) : '—'}</td>
       <td>${noProfile ? '—' : fmtBR(x.rotina)}</td>
@@ -4708,7 +4734,7 @@ function renderEnergyBalance(rep, burn, isDia) {
     chip.innerHTML = `<span class="db-day">${WD[wd]}</span><b>${d.saldo == null ? '·' : fmtSigned(d.saldo)}</b>`;
     chip.title = d.saldo == null
       ? 'Sem refeição registrada'
-      : `${fmtBR(Math.round(d.kcal))} consumidas − ${fmtBR(d.gasto)} gastas (${fmtBR(d.treino)} no treino)`;
+      : `${fmtBR(Math.round(d.kcal))} consumidas − ${fmtBR(d.gasto)} gastas (${fmtBR(d.treino)} no treino)` + (d.moved ? ` · ${movedNote(d)}` : '');
     strip.appendChild(chip);
   });
 }
