@@ -225,6 +225,39 @@ app.delete('/api/measurements/:id', (req, res) => {
   res.json({ success: true });
 });
 
+// Pesagem diária
+app.get('/api/weigh-ins', (req, res) => {
+  res.json(db.prepare('SELECT date, peso FROM weigh_ins WHERE user_id = ? ORDER BY date ASC').all(req.session.userId));
+});
+
+// Grava o peso do dia (substitui se já houver um naquela data)
+app.put('/api/weigh-ins/:date', (req, res) => {
+  const { date } = req.params;
+  const peso = Math.round(+req.body.peso * 10) / 10;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Data inválida' });
+  if (!(peso >= 20 && peso <= 400)) return res.status(400).json({ error: 'Informe um peso entre 20 e 400 kg' });
+  db.prepare(`
+    INSERT INTO weigh_ins (user_id, date, peso) VALUES (?, ?, ?)
+    ON CONFLICT(user_id, date) DO UPDATE SET peso = excluded.peso
+  `).run(req.session.userId, date, peso);
+  res.json({ date, peso });
+});
+
+app.delete('/api/weigh-ins/:date', (req, res) => {
+  db.prepare('DELETE FROM weigh_ins WHERE user_id = ? AND date = ?').run(req.session.userId, req.params.date);
+  res.json({ success: true });
+});
+
+// Série de peso por data: pesagens diárias + peso das medições (a pesagem vale quando os dois caem no mesmo dia)
+function weightSeries(uid) {
+  const byDate = new Map();
+  db.prepare('SELECT date, peso FROM measurements WHERE user_id = ? AND peso > 0 ORDER BY date ASC, id ASC').all(uid)
+    .forEach(m => byDate.set(m.date, m.peso));
+  db.prepare('SELECT date, peso FROM weigh_ins WHERE user_id = ?').all(uid)
+    .forEach(w => byDate.set(w.date, w.peso));
+  return [...byDate.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([date, peso]) => ({ date, peso }));
+}
+
 // Perfil
 app.get('/api/profile', (req, res) => {
   const profile = db.prepare('SELECT * FROM profile WHERE user_id = ?').get(req.session.userId);
@@ -1156,10 +1189,11 @@ function computeGami(userId) {
 
 // ======== CALORIAS GASTAS NO TREINO ========
 
-// Dados da pessoa usados na estimativa: perfil + último peso registrado em Medições
+// Dados da pessoa usados na estimativa: perfil + último peso registrado (pesagem diária ou Medições)
 function personFor(uid) {
   const profile = db.prepare('SELECT sexo, idade, altura FROM profile WHERE user_id = ?').get(uid) || {};
-  const last = db.prepare('SELECT peso FROM measurements WHERE user_id = ? AND peso > 0 ORDER BY date DESC, id DESC LIMIT 1').get(uid);
+  const series = weightSeries(uid);
+  const last = series[series.length - 1];
   return {
     peso: last ? last.peso : 0,
     sexo: profile.sexo || '',
@@ -2534,24 +2568,30 @@ function buildAiContext(uid) {
 
   // Medições corporais: primeira, última e evolução
   const meas = db.prepare('SELECT * FROM measurements WHERE user_id = ? ORDER BY date ASC').all(uid);
+  const pesoSeries = weightSeries(uid);
+  const lastPeso = pesoSeries[pesoSeries.length - 1];
+
+  // Objetivo explícito: evita a IA confundir se o usuário quer ganhar ou perder peso
+  if (lastPeso && profile.peso_meta) {
+    const diff = lastPeso.peso - profile.peso_meta;
+    if (Math.abs(diff) >= 0.5) {
+      lines.push(`\nOBJETIVO ATUAL: ${diff > 0 ? 'PERDER' : 'GANHAR'} ${fmtNum(Math.abs(diff))} kg (peso atual ${fmtNum(lastPeso.peso)} kg em ${lastPeso.date}, meta ${fmtNum(profile.peso_meta)} kg).`);
+    } else {
+      lines.push(`\nOBJETIVO ATUAL: manter o peso (atual ${fmtNum(lastPeso.peso)} kg, meta ${fmtNum(profile.peso_meta)} kg).`);
+    }
+  }
+  const p30 = pesoSeries.filter(m => m.date >= daysAgo(30));
+  if (p30.length >= 2) {
+    const d = p30[p30.length - 1].peso - p30[0].peso;
+    lines.push(`Tendência recente: ${d > 0 ? '+' : ''}${fmtNum(d)} kg nos últimos 30 dias (${p30.length} pesagens).`);
+  }
+  if (pesoSeries.length > 1) {
+    lines.push(`Últimos pesos: ${pesoSeries.slice(-7).map(m => `${m.date}: ${fmtNum(m.peso)} kg`).join('; ')}`);
+  }
+
   if (meas.length) {
     const first = meas[0];
     const last = meas[meas.length - 1];
-
-    // Objetivo explícito: evita a IA confundir se o usuário quer ganhar ou perder peso
-    if (last.peso && profile.peso_meta) {
-      const diff = last.peso - profile.peso_meta;
-      if (Math.abs(diff) >= 0.5) {
-        lines.push(`\nOBJETIVO ATUAL: ${diff > 0 ? 'PERDER' : 'GANHAR'} ${fmtNum(Math.abs(diff))} kg (peso atual ${fmtNum(last.peso)} kg, meta ${fmtNum(profile.peso_meta)} kg).`);
-      } else {
-        lines.push(`\nOBJETIVO ATUAL: manter o peso (atual ${fmtNum(last.peso)} kg, meta ${fmtNum(profile.peso_meta)} kg).`);
-      }
-    }
-    const m30 = meas.filter(m => m.peso && m.date >= daysAgo(30));
-    if (m30.length >= 2) {
-      const d = m30[m30.length - 1].peso - m30[0].peso;
-      lines.push(`Tendência recente: ${d > 0 ? '+' : ''}${fmtNum(d)} kg nos últimos 30 dias.`);
-    }
     lines.push(`\nMedições corporais (${meas.length} registros, de ${first.date} a ${last.date}):`);
     const fields = [
       ['peso', 'Peso (kg)'], ['biceps_contraido', 'Bíceps contraído'], ['antebraco', 'Antebraço'],
@@ -2563,10 +2603,6 @@ function buildAiContext(uid) {
       const delta = first[k] !== null && first[k] !== undefined ? (last[k] - first[k]) : null;
       lines.push(`- ${label}: ${fmtNum(last[k])}${delta !== null ? ` (${delta >= 0 ? '+' : ''}${fmtNum(delta)} desde o início)` : ''}`);
     });
-    const pesos = meas.filter(m => m.peso).slice(-5);
-    if (pesos.length > 1) {
-      lines.push(`- Últimos pesos: ${pesos.map(m => `${m.date}: ${fmtNum(m.peso)} kg`).join('; ')}`);
-    }
   } else {
     lines.push('\nSem medições corporais registradas.');
   }

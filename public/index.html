@@ -188,6 +188,49 @@
           <div class="body-diagram" id="body-diagram"></div>
         </div>
       </div>
+      <section class="wt" id="weight-tracker">
+        <div class="wt-head">
+          <div>
+            <h3>Peso diário</h3>
+            <p class="table-sub" id="wt-sub">Suba na balança e registre — o gráfico mostra a tendência</p>
+          </div>
+          <form class="wt-form" id="wt-form">
+            <input type="date" id="wt-date" aria-label="Data da pesagem" required>
+            <label class="wt-kg">
+              <input type="number" id="wt-peso" step="0.1" min="20" max="400" inputmode="decimal" placeholder="0,0" aria-label="Peso em kg" required>
+              <span>kg</span>
+            </label>
+            <button class="btn-primary btn-sm" type="submit" id="wt-save">Salvar</button>
+          </form>
+        </div>
+        <p class="empty-msg" id="wt-empty">Nenhuma pesagem ainda. Registre seu peso de hoje acima — de preferência sempre no mesmo horário (ao acordar, antes de comer).</p>
+        <div id="wt-body" hidden>
+          <div class="wt-tiles">
+            <div class="ea-tile"><span class="ea-tile-label">Último peso</span><span class="ea-tile-value" id="wt-last">—</span><span class="ea-tile-sub" id="wt-last-sub"></span></div>
+            <div class="ea-tile"><span class="ea-tile-label">Média 7 dias</span><span class="ea-tile-value" id="wt-avg">—</span><span class="ea-tile-sub" id="wt-avg-sub"></span></div>
+            <div class="ea-tile"><span class="ea-tile-label">Últimos 30 dias</span><span class="ea-tile-value" id="wt-30">—</span><span class="ea-tile-sub" id="wt-30-sub"></span></div>
+            <div class="ea-tile"><span class="ea-tile-label">Desde o início</span><span class="ea-tile-value" id="wt-total">—</span><span class="ea-tile-sub" id="wt-total-sub"></span></div>
+          </div>
+          <div class="wt-chart-bar">
+            <div class="wt-legend">
+              <span><i class="wt-key-dot"></i>Pesagem</span>
+              <span><i class="wt-key-line"></i>Média 7 dias</span>
+              <span id="wt-key-meta" hidden><i class="wt-key-meta"></i>Meta</span>
+            </div>
+            <div class="wt-range" id="wt-range" role="group" aria-label="Período do gráfico">
+              <button type="button" data-days="30">30 dias</button>
+              <button type="button" data-days="90">90 dias</button>
+              <button type="button" data-days="0">Tudo</button>
+            </div>
+          </div>
+          <div class="wt-chart" id="wt-chart"></div>
+          <details class="ea-table wt-list">
+            <summary>Ver pesagens</summary>
+            <ul id="wt-list"></ul>
+          </details>
+        </div>
+      </section>
+
       <div id="body-tooltip" class="body-tooltip" style="display:none"></div>
       <div class="table-wrapper">
         <div class="table-bar">

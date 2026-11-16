@@ -91,7 +91,7 @@ async function api(method, url, body) {
 }
 
 async function loadData() {
-  measurements = await api('GET', '/api/measurements');
+  [measurements] = await Promise.all([api('GET', '/api/measurements'), loadWeighIns()]);
   render();
 }
 
@@ -330,7 +330,8 @@ function renderBodyDiagram() {
     container.innerHTML = '<p class="body-empty">Adicione uma medição para visualizar o boneco.</p>';
     titleEl.textContent = 'Última Medição';
     subEl.textContent = 'Nenhuma medição registrada';
-    pesoEl.textContent = '—';
+    const series = weightSeries();
+    pesoEl.textContent = series.length ? fmtKg(series[series.length - 1].peso) : '—';
     pesoDeltaEl.textContent = '';
     attrsEl.innerHTML = '';
     renderBodyGoal();
@@ -354,11 +355,19 @@ function renderBodyDiagram() {
     subEl.textContent = `${formatDate(current.date)}${current.label ? ' — ' + current.label : ''}`;
   }
 
-  pesoEl.textContent = current.peso != null ? String(current.peso).replace('.', ',') + ' kg' : '—';
+  // Fora do modo comparação o peso vem da série completa (inclui a pesagem diária)
+  let pesoNow = current.peso;
+  let pesoPrev = compare ? compare.peso : null;
+  const series = weightSeries();
+  if (!hasEvo && series.length) {
+    pesoNow = series[series.length - 1].peso;
+    pesoPrev = series.length >= 2 ? series[series.length - 2].peso : null;
+  }
+  pesoEl.textContent = pesoNow != null ? fmtKg(pesoNow) : '—';
   pesoDeltaEl.textContent = '';
   pesoDeltaEl.className = 'med-peso-delta';
-  if (compare && compare.peso != null && current.peso != null) {
-    const diff = current.peso - compare.peso;
+  if (pesoPrev != null && pesoNow != null) {
+    const diff = pesoNow - pesoPrev;
     if (Math.abs(diff) >= 0.05) {
       pesoDeltaEl.textContent = (diff > 0 ? '+' : '') + diff.toFixed(1).replace('.', ',') + ' kg';
       pesoDeltaEl.classList.add(diff > 0 ? 'warning' : 'positive');
@@ -423,7 +432,7 @@ function renderBodyGoal() {
   if (!goalEl) return;
 
   const meta = profileData && profileData.peso_meta != null ? Number(profileData.peso_meta) : null;
-  const withPeso = measurements.filter(m => m.peso != null);
+  const withPeso = weightSeries();
   if (!meta || withPeso.length === 0) {
     goalEl.style.display = 'none';
     return;
@@ -461,6 +470,329 @@ function renderBodyGoal() {
   startEl.textContent = `Atual ${fmtKg(currentW)}`;
   targetEl.textContent = `Meta ${fmtKg(meta)}`;
 }
+
+// ======== PESO DIÁRIO ========
+let weighIns = [];
+let wtRangeDays = 30;
+try {
+  const saved = localStorage.getItem('gym_wt_range');
+  if (saved !== null && ['0', '30', '90'].includes(saved)) wtRangeDays = +saved;
+} catch {}
+
+// Série única de peso por data: pesagens diárias + peso das medições (a pesagem vale quando os dois caem no mesmo dia)
+function weightSeries() {
+  const byDate = new Map();
+  measurements.forEach(m => { if (m.peso > 0) byDate.set(m.date, +m.peso); });
+  weighIns.forEach(w => byDate.set(w.date, +w.peso));
+  return [...byDate.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([date, peso]) => ({ date, peso }));
+}
+
+// Data ISO -> número do dia (meio-dia UTC evita pular dia por fuso/horário de verão)
+const wtDay = (iso) => Math.floor(Date.parse(iso + 'T12:00:00Z') / 864e5);
+const wtIso = (day) => new Date(day * 864e5).toISOString().slice(0, 10);
+
+// Média móvel dos últimos 7 dias corridos: suaviza a oscilação diária (água, sal, intestino)
+function withMovingAvg(series) {
+  return series.map((p, i) => {
+    const d = wtDay(p.date);
+    let sum = 0;
+    let n = 0;
+    for (let j = i; j >= 0 && d - wtDay(series[j].date) < 7; j--) { sum += series[j].peso; n++; }
+    return { ...p, ma: sum / n };
+  });
+}
+
+function fmtKgDelta(d) {
+  if (Math.abs(d) < 0.05) return '0 kg';
+  return `${d > 0 ? '+' : '−'}${Math.abs(d).toFixed(1).replace('.', ',')} kg`;
+}
+
+// Verde quando a variação aponta para a meta de peso, laranja quando se afasta; sem meta, neutro
+function wtTone(delta, current) {
+  const meta = profileData && profileData.peso_meta != null ? +profileData.peso_meta : null;
+  if (!meta || Math.abs(delta) < 0.05 || Math.abs(current - meta) < 0.05) return '';
+  return Math.sign(delta) === Math.sign(meta - current) ? 'good' : 'bad';
+}
+
+function wtRelDate(iso) {
+  const diff = wtDay(todayStr()) - wtDay(iso);
+  if (diff === 0) return 'hoje';
+  if (diff === 1) return 'ontem';
+  return formatShortDate(iso);
+}
+
+function setWtTile(id, value, sub, tone = '') {
+  const v = document.getElementById(id);
+  v.textContent = value;
+  v.className = 'ea-tile-value' + (tone ? ' ' + tone : '');
+  document.getElementById(id + '-sub').textContent = sub;
+}
+
+function renderWeightTracker() {
+  const series = withMovingAvg(weightSeries());
+  const has = series.length > 0;
+  document.getElementById('wt-empty').hidden = has;
+  document.getElementById('wt-body').hidden = !has;
+  renderWtList();
+  if (!has) return;
+
+  const last = series[series.length - 1];
+  const lastDay = wtDay(last.date);
+  const prev = series[series.length - 2];
+
+  setWtTile('wt-last', fmtKg(last.peso),
+    wtRelDate(last.date) + (prev ? ` · ${fmtKgDelta(last.peso - prev.peso)} vs anterior` : ''));
+
+  const weekAgo = [...series].reverse().find(p => wtDay(p.date) <= lastDay - 7);
+  const maDelta = weekAgo ? last.ma - weekAgo.ma : null;
+  setWtTile('wt-avg', fmtKg(last.ma),
+    maDelta != null ? `${fmtKgDelta(maDelta)} na semana` : 'tendência sem o sobe-e-desce');
+
+  const first30 = series.find(p => wtDay(p.date) > lastDay - 30);
+  if (first30 && first30 !== last) {
+    const d30 = last.peso - first30.peso;
+    setWtTile('wt-30', fmtKgDelta(d30), `desde ${formatShortDate(first30.date)}`, wtTone(d30, last.peso));
+  } else {
+    setWtTile('wt-30', '—', 'registre mais dias');
+  }
+
+  const first = series[0];
+  const dTotal = last.peso - first.peso;
+  setWtTile('wt-total', series.length > 1 ? fmtKgDelta(dTotal) : '—',
+    `${series.length} ${series.length === 1 ? 'pesagem' : 'pesagens'} desde ${formatShortDate(first.date)}`,
+    series.length > 1 ? wtTone(dTotal, last.peso) : '');
+
+  document.querySelectorAll('#wt-range button').forEach(b => b.classList.toggle('active', +b.dataset.days === wtRangeDays));
+  wtChart(document.getElementById('wt-chart'), series);
+}
+
+// Linha da média de 7 dias por cima das pesagens; eixo de tempo real (dias sem pesagem viram espaço)
+function wtChart(el, full) {
+  el.innerHTML = '';
+  const endDay = Math.max(wtDay(todayStr()), wtDay(full[full.length - 1].date));
+  let startDay = wtRangeDays ? endDay - wtRangeDays + 1 : wtDay(full[0].date);
+  const pts = full.filter(p => wtDay(p.date) >= startDay);
+  if (!pts.length) {
+    el.innerHTML = '<p class="empty-msg">Nenhuma pesagem neste período.</p>';
+    document.getElementById('wt-key-meta').hidden = true;
+    return;
+  }
+  if (!wtRangeDays) startDay = Math.min(startDay, endDay - 6);
+
+  const W = Math.max(280, el.clientWidth || 320);
+  const H = el.clientHeight || 220;
+  const m = { t: 16, r: 14, b: 24, l: 40 };
+  const iw = W - m.l - m.r;
+  const ih = H - m.t - m.b;
+
+  const vals = pts.flatMap(p => [p.peso, p.ma]);
+  let lo = Math.min(...vals);
+  let hi = Math.max(...vals);
+  const meta = profileData && profileData.peso_meta != null ? +profileData.peso_meta : null;
+  // A meta só entra na escala se estiver por perto — senão achata a curva
+  const showMeta = meta && meta >= lo - 6 && meta <= hi + 6;
+  if (showMeta) { lo = Math.min(lo, meta); hi = Math.max(hi, meta); }
+  document.getElementById('wt-key-meta').hidden = !showMeta;
+  const span = Math.max(hi - lo, 1);
+  const step = [0.5, 1, 2, 5, 10, 20].find(s => span / s <= 5) || 50;
+  lo = Math.floor((lo - span * 0.08) / step) * step;
+  hi = Math.ceil((hi + span * 0.08) / step) * step;
+
+  const x = (day) => m.l + (endDay === startDay ? iw / 2 : ((day - startDay) / (endDay - startDay)) * iw);
+  const y = (v) => m.t + ih - ((v - lo) / (hi - lo)) * ih;
+
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('width', W);
+  svg.setAttribute('height', H);
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', `Gráfico de peso: ${pts.length} pesagens, última ${fmtKg(pts[pts.length - 1].peso)}`);
+  const mk = (tag, attrs, parent = svg) => {
+    const e = document.createElementNS(ns, tag);
+    Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v));
+    parent.appendChild(e);
+    return e;
+  };
+
+  const grad = mk('linearGradient', { id: 'wt-grad', x1: 0, x2: 0, y1: 0, y2: 1 }, mk('defs', {}));
+  mk('stop', { offset: '0%', 'stop-color': '#fff', 'stop-opacity': 0.12 }, grad);
+  mk('stop', { offset: '100%', 'stop-color': '#fff', 'stop-opacity': 0 }, grad);
+
+  for (let v = lo; v <= hi + 1e-9; v += step) {
+    mk('line', { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), class: 'ea-grid' });
+    mk('text', { x: m.l - 6, y: y(v) + 3.5, class: 'ea-axis', 'text-anchor': 'end' }).textContent = fmtDec(v);
+  }
+
+  const days = endDay - startDay;
+  const nLabels = Math.min(W < 520 ? 4 : 6, days + 1);
+  for (let i = 0; i < nLabels; i++) {
+    const day = Math.round(endDay - (days * i) / Math.max(1, nLabels - 1));
+    mk('text', { x: x(day), y: H - 6, class: 'ea-axis', 'text-anchor': i === 0 ? 'end' : i === nLabels - 1 ? 'start' : 'middle' })
+      .textContent = shortDM(wtIso(day));
+  }
+
+  if (showMeta) {
+    mk('line', { x1: m.l, x2: W - m.r, y1: y(meta), y2: y(meta), class: 'wt-meta' });
+    mk('text', { x: W - m.r, y: y(meta) - 5, class: 'wt-meta-label', 'text-anchor': 'end' }).textContent = `Meta ${fmtKg(meta)}`;
+  }
+
+  const P = pts.map(p => ({ ...p, px: x(wtDay(p.date)), py: y(p.peso), my: y(p.ma) }));
+  const maPath = P.map((p, i) => `${i ? 'L' : 'M'}${p.px},${p.my}`).join(' ');
+  if (P.length > 1) {
+    mk('path', { d: `${maPath} L${P[P.length - 1].px},${m.t + ih} L${P[0].px},${m.t + ih} Z`, class: 'wt-area' });
+    mk('path', { d: P.map((p, i) => `${i ? 'L' : 'M'}${p.px},${p.py}`).join(' '), class: 'wt-raw' });
+  }
+  const r = P.length > 60 ? 2 : 3;
+  P.forEach((p, i) => mk('circle', { cx: p.px, cy: p.py, r, class: 'wt-dot', 'data-i': i }));
+  if (P.length > 1) mk('path', { d: maPath, class: 'wt-ma' });
+
+  const lp = P[P.length - 1];
+  mk('circle', { cx: lp.px, cy: lp.py, r: 5, class: 'wt-last' });
+  // Rótulo do lado oposto à linha da média, para não encostar nela
+  const below = P.length > 1 && lp.py > lp.my;
+  mk('text', { x: lp.px, y: below ? lp.py + 18 : lp.py - 10, class: 'ea-val', 'text-anchor': lp.px > W - 40 ? 'end' : 'middle' }).textContent = fmtDec(lp.peso);
+
+  // Hover/toque: pega a pesagem mais próxima na horizontal
+  const tip = document.createElement('div');
+  tip.className = 'ea-tip';
+  tip.hidden = true;
+  const cross = mk('line', { x1: 0, x2: 0, y1: m.t, y2: m.t + ih, class: 'ea-cross', visibility: 'hidden' });
+  const hit = mk('rect', { x: m.l, y: 0, width: iw, height: H, class: 'ea-hit', tabindex: 0 });
+  let cur = -1;
+  const show = (i) => {
+    if (i === cur) return;
+    cur = i;
+    const p = P[i];
+    tip.innerHTML = '<b></b><span></span><small></small>';
+    tip.querySelector('b').textContent = fmtKg(p.peso);
+    tip.querySelector('span').textContent = new Date(p.date + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'short', day: 'numeric', month: 'short' });
+    tip.querySelector('small').textContent = `Média 7 dias ${fmtKg(p.ma)}`;
+    tip.hidden = false;
+    const left = Math.min(Math.max(p.px / W * el.clientWidth, 70), el.clientWidth - 70);
+    tip.style.left = left + 'px';
+    tip.style.top = (Math.min(p.py, p.my) / H * el.clientHeight - 8) + 'px';
+    cross.setAttribute('x1', p.px);
+    cross.setAttribute('x2', p.px);
+    cross.setAttribute('visibility', 'visible');
+    svg.querySelectorAll('.wt-dot').forEach(d => d.classList.toggle('hover', +d.dataset.i === i));
+  };
+  const hide = () => {
+    cur = -1;
+    tip.hidden = true;
+    cross.setAttribute('visibility', 'hidden');
+    svg.querySelectorAll('.wt-dot.hover').forEach(d => d.classList.remove('hover'));
+  };
+  const nearest = (clientX) => {
+    const rect = svg.getBoundingClientRect();
+    const sx = (clientX - rect.left) / rect.width * W;
+    let best = 0;
+    P.forEach((p, i) => { if (Math.abs(p.px - sx) < Math.abs(P[best].px - sx)) best = i; });
+    return best;
+  };
+  hit.addEventListener('pointermove', e => show(nearest(e.clientX)));
+  hit.addEventListener('pointerdown', e => show(nearest(e.clientX)));
+  hit.addEventListener('pointerleave', hide);
+  hit.addEventListener('focus', () => show(P.length - 1));
+  hit.addEventListener('blur', hide);
+  hit.addEventListener('keydown', e => {
+    if (e.key === 'ArrowLeft') { e.preventDefault(); show(Math.max(0, (cur < 0 ? P.length : cur) - 1)); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); show(Math.min(P.length - 1, cur + 1)); }
+  });
+
+  el.appendChild(svg);
+  el.appendChild(tip);
+}
+
+function renderWtList() {
+  const ul = document.getElementById('wt-list');
+  ul.innerHTML = '';
+  const list = [...weighIns].sort((a, b) => b.date.localeCompare(a.date));
+  list.forEach((w, i) => {
+    const older = list[i + 1];
+    const li = document.createElement('li');
+    li.innerHTML = '<span class="wt-li-date"></span><b></b><span class="wt-li-diff"></span><button type="button" title="Excluir">&#10005;</button>';
+    const dateEl = li.querySelector('.wt-li-date');
+    dateEl.textContent = formatDate(w.date);
+    const rel = wtRelDate(w.date);
+    if (rel === 'hoje' || rel === 'ontem') dateEl.insertAdjacentHTML('beforeend', `<small>${rel}</small>`);
+    dateEl.title = 'Editar';
+    dateEl.addEventListener('click', () => wtFillForm(w.date, true));
+    li.querySelector('b').textContent = fmtKg(w.peso);
+    if (older) {
+      const diffEl = li.querySelector('.wt-li-diff');
+      const d = w.peso - older.peso;
+      diffEl.textContent = fmtKgDelta(d);
+      const tone = wtTone(d, w.peso);
+      if (tone) diffEl.classList.add(tone);
+    }
+    li.querySelector('button').addEventListener('click', () => deleteWeighIn(w.date));
+    ul.appendChild(li);
+  });
+  document.querySelector('.wt-list').hidden = list.length === 0;
+}
+
+function wtFillForm(date, focus = false) {
+  const dateEl = document.getElementById('wt-date');
+  const pesoEl = document.getElementById('wt-peso');
+  dateEl.value = date;
+  const existing = weighIns.find(w => w.date === date);
+  pesoEl.value = existing ? existing.peso : '';
+  document.getElementById('wt-save').textContent = existing ? 'Atualizar' : 'Salvar';
+  if (existing && focus) pesoEl.focus();
+}
+
+async function loadWeighIns() {
+  weighIns = await api('GET', '/api/weigh-ins');
+  wtFillForm(document.getElementById('wt-date').value || todayStr());
+}
+
+async function deleteWeighIn(date) {
+  if (!confirm(`Excluir a pesagem de ${formatDate(date)}?`)) return;
+  await api('DELETE', `/api/weigh-ins/${date}`);
+  weighIns = weighIns.filter(w => w.date !== date);
+  renderBodyDiagram();
+  renderWeightTracker();
+  wtFillForm(document.getElementById('wt-date').value);
+}
+
+(function initWeightTracker() {
+  const form = document.getElementById('wt-form');
+  if (!form) return;
+  const dateEl = document.getElementById('wt-date');
+  dateEl.max = todayStr();
+  wtFillForm(todayStr());
+  dateEl.addEventListener('change', () => wtFillForm(dateEl.value));
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const peso = parseFloat(String(document.getElementById('wt-peso').value).replace(',', '.'));
+    if (!(peso >= 20 && peso <= 400)) { toastMsg('Informe um peso entre 20 e 400 kg'); return; }
+    const saved = await api('PUT', `/api/weigh-ins/${dateEl.value}`, { peso });
+    if (saved.error) { toastMsg(saved.error); return; }
+    weighIns = weighIns.filter(w => w.date !== saved.date).concat(saved);
+    renderBodyDiagram();
+    renderWeightTracker();
+    wtFillForm(saved.date);
+    toastMsg(`Peso de ${wtRelDate(saved.date)} salvo: ${fmtKg(saved.peso)}`);
+  });
+
+  document.querySelectorAll('#wt-range button').forEach(b => b.addEventListener('click', () => {
+    wtRangeDays = +b.dataset.days;
+    try { localStorage.setItem('gym_wt_range', String(wtRangeDays)); } catch {}
+    renderWeightTracker();
+  }));
+
+  // O SVG usa a largura real do card: redesenha quando ela muda (rotação, sidebar, aba que estava oculta)
+  let lastW = 0;
+  new ResizeObserver(entries => {
+    const w = Math.round(entries[0].contentRect.width);
+    if (w && w !== lastW) {
+      lastW = w;
+      if (weightSeries().length) renderWeightTracker();
+    }
+  }).observe(document.getElementById('wt-chart'));
+})();
 
 function attachBodyInteractions(container, current, compare) {
   const tooltip = document.getElementById('body-tooltip');
@@ -531,6 +863,7 @@ function attachBodyInteractions(container, current, compare) {
 
 function render() {
   renderBodyDiagram();
+  renderWeightTracker();
   const hasMeasurements = measurements.length > 0;
   document.querySelector('table').style.display = hasMeasurements ? '' : 'none';
   emptyMsg.style.display = hasMeasurements ? 'none' : '';
@@ -734,6 +1067,7 @@ profileForm.addEventListener('submit', async e => {
   modalProfile.classList.add('hidden');
   loadFatsecretStatus(); // mostra ou esconde o card da aba Dieta na hora
   renderBodyGoal();
+  renderWeightTracker();
   const perfilTab = document.getElementById('tab-perfil');
   if (perfilTab && perfilTab.classList.contains('active')) loadPerfilPage();
   const toast = document.createElement('div');
@@ -6077,4 +6411,4 @@ updateHeaderActions('hoje');
 loadData();
 loadHojeData();
 migrateProfile();
-loadProfile().then(() => { renderBodyGoal(); updateSidebarAvatar(); }).catch(() => {});
+loadProfile().then(() => { renderBodyGoal(); renderWeightTracker(); updateSidebarAvatar(); }).catch(() => {});

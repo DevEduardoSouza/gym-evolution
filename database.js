@@ -88,6 +88,17 @@ if (!tableColumns('profile').includes('fatsecret_enabled')) {
   }
 }
 
+// Pesagem diária: um peso por dia (a aba Corpo mostra o gráfico).
+// Fica separada de measurements para não encher a tabela de medidas com uma coluna por dia.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS weigh_ins (
+    user_id INTEGER NOT NULL,
+    date TEXT NOT NULL,
+    peso REAL NOT NULL,
+    PRIMARY KEY (user_id, date)
+  )
+`);
+
 // Seguidores (rede social)
 db.exec(`
   CREATE TABLE IF NOT EXISTS follows (
