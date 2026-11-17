@@ -421,7 +421,7 @@ function renderMedAttrs(current, compare) {
 }
 
 function fmtKg(n) {
-  return `${(+n).toFixed(1).replace(/\.0$/, '').replace('.', ',')} kg`;
+  return `${(+n).toFixed(2).replace(/\.?0+$/, '').replace('.', ',')} kg`;
 }
 
 // Meta de peso: compara o peso atual com a meta definida no perfil.

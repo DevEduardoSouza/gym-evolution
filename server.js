@@ -233,7 +233,7 @@ app.get('/api/weigh-ins', (req, res) => {
 // Grava o peso do dia (substitui se já houver um naquela data)
 app.put('/api/weigh-ins/:date', (req, res) => {
   const { date } = req.params;
-  const peso = Math.round(+req.body.peso * 10) / 10;
+  const peso = Math.round(+req.body.peso * 100) / 100;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Data inválida' });
   if (!(peso >= 20 && peso <= 400)) return res.status(400).json({ error: 'Informe um peso entre 20 e 400 kg' });
   db.prepare(`
